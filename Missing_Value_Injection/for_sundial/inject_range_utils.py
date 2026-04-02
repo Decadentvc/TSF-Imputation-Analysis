@@ -8,6 +8,7 @@ Sundial 模型注错区间确定工具
 import os
 import json
 import math
+import warnings
 import numpy as np
 import pandas as pd
 from pathlib import Path
@@ -16,6 +17,9 @@ from enum import Enum
 
 from pandas.tseries.frequencies import to_offset
 from gluonts.time_feature import norm_freq_str
+
+# 抑制 pandas 频率单位弃用警告
+warnings.filterwarnings('ignore', category=FutureWarning, message=".*'H' is deprecated.*")
 
 
 # ============================================================================
