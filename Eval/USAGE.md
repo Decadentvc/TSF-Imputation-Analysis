@@ -8,13 +8,36 @@ source ~/miniconda3/etc/profile.d/conda.sh
 conda activate TSFIA
 cd /home/decadent/TSF-Imputation-Analysis
 
-# 2. 运行评估（自动模式）
-python Eval/run_sundial.py --eval_data_path datasets/MCAR/MCAR_005/ETTh1_MCAR_005_short.csv --device cpu
+# 2. 一键批量评估（推荐）
+python Eval/run_sundial.py batch --dataset ETTh1 --method MCAR --device cpu
+
+# 3. 单个评估
+python Eval/run_sundial.py single --eval_data_path datasets/MCAR/MCAR_005/ETTh1_MCAR_005_short.csv --device cpu
 ```
 
 ## 常用命令
 
-### 评估缺失数据集
+### 一键批量评估（新增）
+
+只需提供数据集名和注空模式，自动批量评估所有缺失率和 term 组合：
+
+```bash
+# 评估 ETTh1 + MCAR（默认缺失率：5%,10%,15%,20%,25%,30%）
+python Eval/run_sundial.py batch --dataset ETTh1 --method MCAR --device cpu
+
+# 自定义缺失率
+python Eval/run_sundial.py batch --dataset ETTh1 --method MCAR \
+  --missing_ratios 0.05,0.10,0.15 --device cpu
+
+# 使用 GPU
+python Eval/run_sundial.py batch --dataset exchange_rate --method BM --device cuda:0
+```
+
+**自动识别 term 限制**：
+- `national_illness` 等 short 数据集：只评估 short term
+- `ETTh1`, `exchange_rate` 等 med_long 数据集：评估 short/medium/long 三种 term
+
+### 单个评估
 
 #### 自动模式（推荐）
 
@@ -22,10 +45,10 @@ python Eval/run_sundial.py --eval_data_path datasets/MCAR/MCAR_005/ETTh1_MCAR_00
 
 ```bash
 # 评估单个缺失数据集
-python Eval/run_sundial.py --eval_data_path datasets/MCAR/MCAR_005/ETTh1_MCAR_005_short.csv --device cpu
+python Eval/run_sundial.py single --eval_data_path datasets/MCAR/MCAR_005/ETTh1_MCAR_005_short.csv --device cpu
 
 # 使用 GPU 加速
-python Eval/run_sundial.py --eval_data_path datasets/MCAR/MCAR_005/ETTh1_MCAR_005_short.csv --device cuda:0
+python Eval/run_sundial.py single --eval_data_path datasets/MCAR/MCAR_005/ETTh1_MCAR_005_short.csv --device cuda:0
 ```
 
 #### 指定模式
@@ -34,14 +57,14 @@ python Eval/run_sundial.py --eval_data_path datasets/MCAR/MCAR_005/ETTh1_MCAR_00
 
 ```bash
 # 指定干净数据集和 term
-python Eval/run_sundial.py \
+python Eval/run_sundial.py single \
   --eval_data_path datasets/MCAR/MCAR_005/ETTh1_MCAR_005_short.csv \
   --clean_data_path datasets/MCAR/MCAR_050/ETTh1_MCAR_050_short.csv \
   --term short \
   --device cpu
 
 # 任意文件名的评估数据集（不要求命名格式）
-python Eval/run_sundial.py \
+python Eval/run_sundial.py single \
   --eval_data_path datasets/my_custom_eval.csv \
   --clean_data_path datasets/MCAR/MCAR_050/ETTh1_MCAR_050_short.csv \
   --term short \
