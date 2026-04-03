@@ -57,11 +57,7 @@ python Eval/run_sundial.py single --eval_data_path datasets/MCAR/MCAR_005/ETTh1_
 
 ```bash
 # 指定干净数据集和 term
-python Eval/run_sundial.py single \
-  --eval_data_path datasets/MCAR/MCAR_005/ETTh1_MCAR_005_short.csv \
-  --clean_data_path datasets/MCAR/MCAR_050/ETTh1_MCAR_050_short.csv \
-  --term short \
-  --device cpu
+python Eval/run_sundial.py single   --eval_data_path datasets/ori/ETTh1.csv --clean_data_path datasets/ori/ETTh1.csv  --term short --device cpu
 
 # 任意文件名的评估数据集（不要求命名格式）
 python Eval/run_sundial.py single \
