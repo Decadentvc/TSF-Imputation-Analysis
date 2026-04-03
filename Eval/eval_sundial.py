@@ -1,12 +1,13 @@
 """
 评估模块：在脏数据集上滑动窗口进行预测，与干净数据集对应区间对比计算指标
+支持缺失值填补后再评估
 """
 import csv
 import logging
 import math
 from pathlib import Path
 from enum import Enum
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List, Callable
 
 import torch
 import numpy as np
@@ -34,8 +35,45 @@ from gluonts.dataset.common import ListDataset
 from gluonts.dataset.split import split
 from pandas.tseries.frequencies import to_offset
 
+# 导入填补方法
+import sys
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from Imputation.imputation_methods import (
+    zero_imputation,
+    mean_imputation,
+    forward_fill,
+    backward_fill,
+    linear_interpolation,
+    nearest_interpolation,
+    spline_interpolation,
+    seasonal_decomposition_imputation,
+    none_imputation,
+)
+
 TEST_SPLIT = 0.1
 MAX_WINDOW = 20
+
+# 填补方法映射
+IMPUTATION_METHODS = {
+    'zero': zero_imputation,
+    'mean': mean_imputation,
+    'forward': forward_fill,
+    'backward': backward_fill,
+    'linear': linear_interpolation,
+    'nearest': nearest_interpolation,
+    'spline': spline_interpolation,
+    'seasonal': seasonal_decomposition_imputation,
+    'none': none_imputation,
+}
+
+def get_imputation_method(method_name: str) -> Callable:
+    """获取填补方法函数"""
+    if method_name not in IMPUTATION_METHODS:
+        raise ValueError(
+            f"Unknown imputation method: {method_name}. "
+            f"Available methods: {list(IMPUTATION_METHODS.keys())}"
+        )
+    return IMPUTATION_METHODS[method_name]
 
 class Term(Enum):
     SHORT = "short"
@@ -231,9 +269,11 @@ def load_datasets_for_evaluation(
     freq: str,
     term: str = "short",
     prediction_length: Optional[int] = None,
+    imputation_method: Optional[str] = None,
 ):
     """
     从路径加载两个数据集：评估数据集和干净数据集
+    可选择对评估数据集进行缺失值填补
     
     Args:
         eval_data_path: 评估数据集的 CSV 文件路径
@@ -241,6 +281,7 @@ def load_datasets_for_evaluation(
         freq: 数据频率
         term: short/medium/long
         prediction_length: 预测长度，如果不指定则自动计算
+        imputation_method: 填补方法名称，None 表示不填补
     
     Returns:
         eval_test_data, clean_test_data, prediction_length
@@ -268,6 +309,16 @@ def load_datasets_for_evaluation(
     if len(eval_df) != len(clean_df):
         raise ValueError(f"Eval and clean datasets must have the same length. "
                         f"Eval: {len(eval_df)}, Clean: {len(clean_df)}")
+    
+    # 如果指定了填补方法，对评估数据集进行填补
+    if imputation_method and imputation_method.lower() != 'none':
+        print(f"  Applying imputation method: {imputation_method}")
+        imputation_func = get_imputation_method(imputation_method)
+        data_cols = list(eval_df.columns)
+        missing_before = eval_df.isna().sum().sum()
+        eval_df = imputation_func(eval_df, data_cols)
+        missing_after = eval_df.isna().sum().sum()
+        print(f"    Missing values: {missing_before} -> {missing_after}")
     
     term_enum = Term(term)
     
@@ -343,9 +394,11 @@ def evaluate_sundial(
     device: str = "cpu",
     debug: bool = True,
     debug_samples: int = 5,
+    imputation_method: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     核心评估函数：从评估数据集读取历史数据，预测后与干净数据集对比
+    可选择在预测前对评估数据集进行缺失值填补
     
     Args:
         eval_data_path: 评估数据集的 CSV 文件路径
@@ -358,13 +411,18 @@ def evaluate_sundial(
         device: 设备
         debug: 是否输出调试表格
         debug_samples: 调试表格显示的样本数
+        imputation_method: 填补方法名称，None 表示不填补
     
     Returns:
         包含所有评估指标的字典
     """
     
     print(f"\n{'='*80}")
-    print(f"Cross-dataset Evaluation")
+    if imputation_method and imputation_method.lower() != 'none':
+        print(f"Cross-dataset Evaluation with Imputation")
+        print(f"  Imputation: {imputation_method}")
+    else:
+        print(f"Cross-dataset Evaluation")
     print(f"  Eval: {eval_data_path}")
     print(f"  Clean: {clean_data_path}")
     print(f"{'='*80}")
@@ -375,6 +433,7 @@ def evaluate_sundial(
         freq=freq,
         term=term,
         prediction_length=prediction_length,
+        imputation_method=imputation_method,
     )
 
     print(f"\nInitializing Sundial model...")
@@ -452,6 +511,7 @@ def evaluate_sundial(
         "term": term,
         "prediction_length": pred_len,
         "windows": windows,
+        "imputation_method": imputation_method if imputation_method else "none",
         "MSE[mean]": float(evaluator["MSE[mean]"].mean()),
         "MSE[0.5]": float(evaluator["MSE[0.5]"].mean()),
         "MAE[0.5]": float(evaluator["MAE[0.5]"].mean()),
@@ -546,3 +606,4 @@ def save_results_to_csv(results: Dict[str, Any], output_path: str):
             writer.writerow([key, value])
     
     print(f"\nResults saved to: {output_path}")
+
