@@ -51,6 +51,22 @@ def nearest_interpolation(df: pd.DataFrame, data_cols: list) -> pd.DataFrame:
     return df_imputed
 
 
+def polynomial_interpolation(df: pd.DataFrame, data_cols: list, order: int = 2) -> pd.DataFrame:
+    """多项式插值填补
+    
+    Args:
+        df: 包含缺失值的数据框
+        data_cols: 需要填补的列名列表
+        order: 多项式阶数，默认为2（二次多项式）
+    
+    Returns:
+        填补后的数据框
+    """
+    df_imputed = df.copy()
+    df_imputed[data_cols] = df_imputed[data_cols].interpolate(method='polynomial', order=order)
+    return df_imputed
+
+
 def spline_interpolation(df: pd.DataFrame, data_cols: list, order: int = 3) -> pd.DataFrame:
     """样条插值填补"""
     df_imputed = df.copy()
@@ -102,9 +118,10 @@ def get_imputation_method(method_name: str):
         'backward': backward_fill,
         'linear': linear_interpolation,
         'nearest': nearest_interpolation,
+        'polynomial': polynomial_interpolation,
         'spline': spline_interpolation,
         'seasonal': seasonal_decomposition_imputation,
-        'none': none_imputation,  # 不填补
+        'none': none_imputation,
     }
     
     if method_name not in method_map:

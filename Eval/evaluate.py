@@ -142,6 +142,7 @@ class SundialPredictor:
             trust_remote_code=True,
             local_files_only=True
         )
+        self.model = self.model.to(self.device)
         self.prediction_length = prediction_length
         self.num_samples = num_samples
         self.batch_size = batch_size
@@ -194,9 +195,9 @@ class SundialPredictor:
                 row = batch_x_np[i]
                 imputed_row = LastValueImputation()(row)
                 imputed_rows.append(imputed_row)
-            batch_x = torch.tensor(np.vstack(imputed_rows))
-        
-        batch_x = batch_x.to(self.device)
+            batch_x = torch.tensor(np.vstack(imputed_rows)).to(self.device)
+        else:
+            batch_x = batch_x.to(self.device)
         
         if self.device.startswith("cuda"):
             with torch.autocast(device_type="cuda", dtype=torch.bfloat16):

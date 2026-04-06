@@ -87,6 +87,8 @@ def apply_imputation(
         return impute_func(df, data_cols, freq)
     elif method == 'spline':
         return impute_func(df, data_cols, order=3)
+    elif method == 'polynomial':
+        return impute_func(df, data_cols, order=2)
     else:
         return impute_func(df, data_cols)
 
@@ -120,6 +122,8 @@ def run_imputation(
     if freq is None:
         freq = meta.get("frequency", "H")
     
+    prediction_length = meta.get("prediction_length", 0)
+    
     print(f"\n{'='*80}")
     print(f"填补数据")
     print(f"{'='*80}")
@@ -127,6 +131,7 @@ def run_imputation(
     print(f"填补方法: {method}")
     print(f"数据列数: {len(data_cols)}")
     print(f"窗口数: {len(windows)}")
+    print(f"预测长度: {prediction_length}")
     print(f"{'='*80}")
     
     imputed_windows = []
@@ -134,12 +139,22 @@ def run_imputation(
     for df, window_info in windows:
         window_idx = window_info["window_index"]
         
-        df_imputed = apply_imputation(df, method, data_cols, freq)
+        if prediction_length > 0:
+            context_length = len(df) - prediction_length
+            df_context = df.iloc[:context_length].copy()
+            df_forecast = df.iloc[context_length:].copy()
+            
+            df_context_imputed = apply_imputation(df_context, method, data_cols, freq)
+            
+            df_imputed = pd.concat([df_context_imputed, df_forecast])
+        else:
+            df_imputed = apply_imputation(df, method, data_cols, freq)
         
         imputed_windows.append((df_imputed, window_info))
         
         missing_count = df[data_cols].isna().sum().sum()
         print(f"\n窗口 {window_idx}:")
+        print(f"  Context 长度: {context_length if prediction_length > 0 else len(df)}")
         print(f"  原始缺失值数: {missing_count}")
         print(f"  填补后缺失值数: {df_imputed[data_cols].isna().sum().sum()}")
     
@@ -186,7 +201,7 @@ def main():
     parser.add_argument("--input_dir", type=str, required=True,
                         help="带缺失数据的目录路径")
     parser.add_argument("--method", type=str, required=True,
-                        help="填补方法 (zero, mean, forward, backward, linear, nearest, spline, seasonal, none)")
+                        help="填补方法 (zero, mean, forward, backward, linear, nearest, polynomial, spline, seasonal, none)")
     parser.add_argument("--output_dir", type=str, default=None,
                         help="输出目录 (可选，默认为 input_dir 同级的 imputed/{method})")
     parser.add_argument("--freq", type=str, default=None,
