@@ -128,6 +128,7 @@ class SundialPredictor:
             trust_remote_code=True,
             local_files_only=True
         )
+        self.model = self.model.to(self.device)
         self.prediction_length = prediction_length
         self.num_samples = num_samples
         self.batch_size = batch_size
