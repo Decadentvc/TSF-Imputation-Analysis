@@ -28,6 +28,10 @@ from Analysis.analyzer import (
     get_best_method,
 )
 
+from Missing_Value_Injection.for_sundial.inject_range_utils import (
+    get_injection_range as compute_inject_range,
+)
+
 
 DATASETS = ["ETTh1", "ETTh2", "ETTm1", "ETTm2", "electricity", "exchange_rate", "national_illness", "traffic", "weather"]
 
@@ -62,7 +66,7 @@ def get_data_path(
     获取数据路径
     
     Args:
-        data_type: "ori", "missing", "imputed"
+        data_type: "ori", "missing", "imputed", "inject_info"
         dataset: 数据集名称
         ratio: 缺失比例 (如 "005")
         term: term 类型
@@ -91,7 +95,43 @@ def get_data_path(
             if path.exists():
                 return str(path)
     
+    elif data_type == "inject_info":
+        if ratio and term:
+            path = base_path / "MCAR" / f"MCAR_{ratio}" / f"{dataset}_MCAR_{ratio}_{term}_inject_info.json"
+            if path.exists():
+                return str(path)
+    
     return None
+
+
+def get_inject_range(
+    dataset: str,
+    ratio: str,
+    term: str,
+    base_dir: str = "datasets",
+) -> Optional[tuple]:
+    """
+    获取注入区间
+    
+    Args:
+        dataset: 数据集名称
+        ratio: 缺失比例
+        term: term 类型
+        base_dir: 数据根目录
+        
+    Returns:
+        (inject_start, inject_end) 或 None
+    """
+    try:
+        result = compute_inject_range(
+            dataset_name=dataset,
+            term=term,
+            data_path=base_dir,
+        )
+        return result["start_index"], result["end_index"]
+    except Exception as e:
+        print(f"  [错误] 计算注入区间失败: {e}")
+        return None
 
 
 def run_single_analysis(
@@ -101,6 +141,9 @@ def run_single_analysis(
     method: str = "",
     period: int = 24,
     analyzers: List[str] = None,
+    inject_start: int = None,
+    inject_end: int = None,
+    use_inject_range: bool = True,
 ) -> Dict[str, Any]:
     """
     对单个数据文件执行分析
@@ -112,6 +155,9 @@ def run_single_analysis(
         method: 填补方法
         period: 周期
         analyzers: 要使用的分析器列表
+        inject_start: 注入区间起点
+        inject_end: 注入区间终点
+        use_inject_range: 是否只分析注入区间
         
     Returns:
         分析结果字典
@@ -121,12 +167,26 @@ def run_single_analysis(
     
     data = pd.read_csv(data_path)
     
+    original_len = len(data)
+    
+    if use_inject_range and inject_start is not None and inject_end is not None:
+        data = data.iloc[inject_start:inject_end]
+        range_info = f"区间 [{inject_start}:{inject_end}]"
+    else:
+        range_info = "完整数据"
+    
     results = {
         "data_path": data_path,
         "dataset": dataset,
         "data_type": data_type,
         "method": method,
         "period": period,
+        "use_inject_range": use_inject_range,
+        "inject_start": inject_start if use_inject_range else None,
+        "inject_end": inject_end if use_inject_range else None,
+        "original_length": original_len,
+        "analyzed_length": len(data),
+        "range_info": range_info,
         "timestamp": datetime.now().isoformat(),
         "results": {},
     }
@@ -156,6 +216,7 @@ def run_batch_analysis(
     output_dir: str = "results/analysis",
     properties_path: str = "datasets/dataset_properties.json",
     skip_existing: bool = True,
+    use_inject_range: bool = True,
 ) -> Dict[str, Any]:
     """
     批量分析
@@ -170,6 +231,7 @@ def run_batch_analysis(
         output_dir: 输出目录
         properties_path: 属性文件路径
         skip_existing: 是否跳过已存在的结果
+        use_inject_range: 是否只分析注入区间 (默认: True)
         
     Returns:
         批量分析结果
@@ -226,11 +288,23 @@ def run_batch_analysis(
                     print(f"  [跳过] 缺失数据不存在")
                     continue
                 
+                inject_start, inject_end = None, None
+                if use_inject_range:
+                    inject_range = get_inject_range(dataset, ratio, term, base_dir)
+                    if inject_range is not None:
+                        inject_start, inject_end = inject_range
+                        print(f"  [区间] 注入区间: [{inject_start}:{inject_end}]")
+                    else:
+                        print(f"  [警告] 未找到注入区间信息，将分析完整数据")
+                
                 result = {
                     "dataset": dataset,
                     "ratio": ratio,
                     "term": term,
                     "period": period,
+                    "use_inject_range": use_inject_range,
+                    "inject_start": inject_start,
+                    "inject_end": inject_end,
                     "ori": {},
                     "missing": {},
                     "imputed": {},
@@ -238,11 +312,17 @@ def run_batch_analysis(
                 }
                 
                 print(f"  [分析] 干净数据")
-                ori_result = run_single_analysis(ori_path, dataset, "ori", period=period, analyzers=analyzers)
+                ori_result = run_single_analysis(
+                    ori_path, dataset, "ori", period=period, analyzers=analyzers,
+                    inject_start=inject_start, inject_end=inject_end, use_inject_range=use_inject_range
+                )
                 result["ori"] = ori_result["results"]
                 
                 print(f"  [分析] 缺失数据")
-                missing_result = run_single_analysis(missing_path, dataset, "missing", period=period, analyzers=analyzers)
+                missing_result = run_single_analysis(
+                    missing_path, dataset, "missing", period=period, analyzers=analyzers,
+                    inject_start=inject_start, inject_end=inject_end, use_inject_range=use_inject_range
+                )
                 result["missing"] = missing_result["results"]
                 
                 imputed_results = {}
@@ -250,7 +330,10 @@ def run_batch_analysis(
                     imputed_path = get_data_path("imputed", dataset, ratio, term, method, base_dir)
                     if imputed_path:
                         print(f"  [分析] 填补数据 - {method}")
-                        imputed_result = run_single_analysis(imputed_path, dataset, "imputed", method, period, analyzers)
+                        imputed_result = run_single_analysis(
+                            imputed_path, dataset, "imputed", method, period, analyzers,
+                            inject_start=inject_start, inject_end=inject_end, use_inject_range=use_inject_range
+                        )
                         imputed_results[method] = imputed_result["results"]
                 
                 result["imputed"] = imputed_results
@@ -377,10 +460,18 @@ def main():
                         help="跳过已存在的结果 (默认: True)")
     parser.add_argument("--no_skip_existing", action="store_true",
                         help="不跳过已存在的结果")
+    parser.add_argument("--full_data", action="store_true",
+                        help="分析完整数据而非注入区间 (默认: 分析注入区间)")
     
     args = parser.parse_args()
     
     skip_existing = not args.no_skip_existing if args.no_skip_existing else args.skip_existing
+    use_inject_range = not args.full_data
+    
+    if use_inject_range:
+        print("[模式] 分析注入区间")
+    else:
+        print("[模式] 分析完整数据")
     
     ratios = args.ratios
     if ratios is None:
@@ -394,6 +485,7 @@ def main():
         base_dir=args.base_dir,
         output_dir=args.output_dir,
         skip_existing=skip_existing,
+        use_inject_range=use_inject_range,
     )
     
     generate_summary_report(all_results, args.output_dir)
