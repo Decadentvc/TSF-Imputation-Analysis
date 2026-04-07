@@ -315,10 +315,7 @@ done
 ### 为单个数据集注入多个缺失率
 
 ```bash
-python Missing_Value_Injection/for_sundial/MI_all.py \
-  --missing_pattern MCAR \
-  --dataset ETTh1 \
-  --missing_ratio "0.05,0.1,0.15,0.2"
+python Missing_Value_Injection/for_sundial/MI_all.py --missing_pattern MCAR --dataset ETTh1 --missing_ratio "0.05,0.1,0.15,0.2,0.25,0.3"
 ```
 
 ## 注意事项
