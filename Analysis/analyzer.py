@@ -1,7 +1,8 @@
 """
 时间序列分析模块
 
-包含 STL 分解、FFT 频域分析、ACF 自相关分析
+包含 STL 分解分析和特征指标计算
+参考文献：基于STL分解的时间序列特征提取方法
 """
 
 import json
@@ -10,7 +11,6 @@ import pandas as pd
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 from statsmodels.tsa.seasonal import STL
-from statsmodels.tsa.stattools import acf
 
 
 def load_dataset_properties(properties_path: str = "datasets/dataset_properties.json") -> dict:
@@ -37,6 +37,174 @@ def get_data_cols(df: pd.DataFrame) -> List[str]:
     return [col for col in df.columns if col.lower() not in time_cols]
 
 
+def calculate_trend_strength(trend: np.ndarray, residual: np.ndarray) -> float:
+    """
+    趋势强度
+    
+    公式: F_TS = max(0, 1 - Var(R) / Var(T + R))
+    含义: 量化趋势分量相较于残差的强度
+    取值范围: [0, 1]
+    """
+    var_residual = np.var(residual)
+    var_trend_residual = np.var(trend + residual)
+    
+    if var_trend_residual == 0:
+        return 0.0
+    
+    strength = 1 - (var_residual / var_trend_residual)
+    return max(0.0, strength)
+
+
+def calculate_trend_linearity(trend: np.ndarray) -> float:
+    """
+    趋势线性度
+    
+    公式: 使用正交二次回归 T_t = β_0 + β_1 * P_1(t) + β_2 * P_2(t) + ε_t
+    趋势线性度 = β_1
+    含义: 捕获趋势内线性进展的总体方向和陡度
+    取值范围: 实数，正值上升，负值下降
+    """
+    L = len(trend)
+    t = np.arange(1, L + 1)
+    
+    P1 = t - np.mean(t)
+    P2 = (t - np.mean(t))**2 - np.mean((t - np.mean(t))**2)
+    
+    dot_P1_P2 = np.dot(P1, P2)
+    if dot_P1_P2 != 0:
+        P2 = P2 - (dot_P1_P2 / np.dot(P1, P1)) * P1
+    
+    X = np.column_stack([np.ones(L), P1, P2])
+    beta = np.linalg.lstsq(X, trend, rcond=None)[0]
+    
+    return float(beta[1])
+
+
+def calculate_seasonal_strength(seasonal: np.ndarray, residual: np.ndarray) -> float:
+    """
+    季节强度
+    
+    公式: F_SS = max(0, 1 - Var(R) / Var(S + R))
+    含义: 量化季节性分量相较于残差的强度
+    取值范围: [0, 1]
+    """
+    var_residual = np.var(residual)
+    var_seasonal_residual = np.var(seasonal + residual)
+    
+    if var_seasonal_residual == 0:
+        return 0.0
+    
+    strength = 1 - (var_residual / var_seasonal_residual)
+    return max(0.0, strength)
+
+
+def calculate_seasonal_correlation(seasonal: np.ndarray, period: int) -> float:
+    """
+    季节相关性
+    
+    公式: F_SC = 2/(K(K-1)) * Σ_{i=1}^{K} Σ_{j=i+1}^{K} Corr(s_i, s_j)
+    含义: 所有K个完整季节周期之间的平均皮尔逊相关系数
+    取值范围: [-1, 1]
+    """
+    n = len(seasonal)
+    K = n // period
+    
+    if K < 2:
+        return 0.0
+    
+    truncated_len = K * period
+    seasonal_truncated = seasonal[:truncated_len]
+    seasons = seasonal_truncated.reshape(K, period)
+    
+    correlations = []
+    for i in range(K):
+        for j in range(i + 1, K):
+            s_i = seasons[i]
+            s_j = seasons[j]
+            
+            std_i = np.std(s_i)
+            std_j = np.std(s_j)
+            
+            if std_i == 0 or std_j == 0:
+                continue
+            
+            corr = np.corrcoef(s_i, s_j)[0, 1]
+            if not np.isnan(corr):
+                correlations.append(corr)
+    
+    if not correlations:
+        return 0.0
+    
+    return float(np.mean(correlations))
+
+
+def calculate_residual_autocorr_lag1(residual: np.ndarray) -> float:
+    """
+    残差一阶自相关性
+    
+    公式: F_RA = E[(R_t - R̄)(R_{t-1} - R̄)] / Var(R)
+    含义: 残差序列的一阶自相关程度
+    取值范围: [-1, 1]
+    """
+    n = len(residual)
+    
+    if n < 2:
+        return 0.0
+    
+    mean_res = np.mean(residual)
+    
+    numerator = np.sum((residual[1:] - mean_res) * (residual[:-1] - mean_res))
+    denominator = np.sum((residual - mean_res) ** 2)
+    
+    if denominator == 0:
+        return 0.0
+    
+    return float(numerator / denominator)
+
+
+def calculate_spectral_entropy(series: np.ndarray) -> float:
+    """
+    谱熵
+    
+    公式: I(f) = ∫_{-π}^{π} log f(ω) dω
+    离散形式: I(f) = Σ log(PSD(ω_i))
+    含义: 衡量时间序列的频谱分布的复杂度
+    取值范围: 实数
+    """
+    series = series - np.mean(series)
+    n = len(series)
+    
+    if n < 2:
+        return 0.0
+    
+    fft_result = np.fft.fft(series)
+    psd = np.abs(fft_result[:n//2]) ** 2
+    psd = psd[psd > 1e-10]
+    
+    if len(psd) == 0:
+        return 0.0
+    
+    return float(np.sum(np.log(psd)))
+
+
+def calculate_all_metrics(
+    original: np.ndarray,
+    trend: np.ndarray,
+    seasonal: np.ndarray,
+    residual: np.ndarray,
+    period: int
+) -> Dict[str, float]:
+    """计算所有6个指标"""
+    return {
+        "trend_strength": calculate_trend_strength(trend, residual),
+        "trend_linearity": calculate_trend_linearity(trend),
+        "seasonal_strength": calculate_seasonal_strength(seasonal, residual),
+        "seasonal_correlation": calculate_seasonal_correlation(seasonal, period),
+        "residual_autocorr_lag1": calculate_residual_autocorr_lag1(residual),
+        "spectral_entropy": calculate_spectral_entropy(original),
+    }
+
+
 class STLAnalyzer:
     """STL 分解分析器"""
     
@@ -52,7 +220,7 @@ class STLAnalyzer:
         save_series: bool = True,
     ) -> Dict[str, Any]:
         """
-        执行 STL 分解分析
+        执行 STL 分解分析，计算6个特征指标
         
         Args:
             data: 时间序列数据
@@ -66,10 +234,14 @@ class STLAnalyzer:
         """
         data_cols = get_data_cols(data)
         
-        all_trend_strength = []
-        all_seasonal_strength = []
-        all_residual_strength = []
-        all_trend_change_rate = []
+        all_metrics = {
+            "trend_strength": [],
+            "trend_linearity": [],
+            "seasonal_strength": [],
+            "seasonal_correlation": [],
+            "residual_autocorr_lag1": [],
+            "spectral_entropy": [],
+        }
         
         all_trend_series = []
         all_seasonal_series = []
@@ -85,34 +257,28 @@ class STLAnalyzer:
                 stl = STL(series, period=self.period, robust=True)
                 result = stl.fit()
                 
-                trend = result.trend
-                seasonal = result.seasonal
-                residual = result.resid
+                trend = result.trend.values
+                seasonal = result.seasonal.values
+                residual = result.resid.values
+                original = series.values
                 
-                var_original = np.var(series)
-                var_trend = np.var(trend)
-                var_seasonal = np.var(seasonal)
-                var_residual = np.var(residual)
+                metrics = calculate_all_metrics(
+                    original, trend, seasonal, residual, self.period
+                )
                 
-                if var_original > 0:
-                    all_trend_strength.append(var_trend / var_original)
-                    all_seasonal_strength.append(var_seasonal / var_original)
-                    all_residual_strength.append(var_residual / var_original)
-                
-                trend_diff = np.diff(trend)
-                if len(trend_diff) > 0:
-                    all_trend_change_rate.append(np.mean(np.abs(trend_diff)))
+                for key, value in metrics.items():
+                    all_metrics[key].append(value)
                 
                 if save_series:
-                    all_trend_series.append(trend.values)
-                    all_seasonal_series.append(seasonal.values)
-                    all_residual_series.append(residual.values)
+                    all_trend_series.append(trend)
+                    all_seasonal_series.append(seasonal)
+                    all_residual_series.append(residual)
                     
             except Exception as e:
                 print(f"    [警告] STL 分解失败 {col}: {e}")
                 continue
         
-        if not all_trend_strength:
+        if not all_metrics["trend_strength"]:
             return {
                 "analyzer": "STL",
                 "dataset": dataset,
@@ -124,29 +290,32 @@ class STLAnalyzer:
                 "error": "No valid series for STL decomposition",
             }
         
-        metrics = {
-            "trend_strength": float(np.mean(all_trend_strength)),
-            "seasonal_strength": float(np.mean(all_seasonal_strength)),
-            "residual_strength": float(np.mean(all_residual_strength)),
-            "trend_change_rate": float(np.mean(all_trend_change_rate)) if all_trend_change_rate else 0.0,
-        }
+        avg_metrics = {key: float(np.mean(values)) for key, values in all_metrics.items()}
         
         details = {
-            "n_series": len(all_trend_strength),
+            "n_series": len(all_metrics["trend_strength"]),
             "period": self.period,
         }
         
         if save_series and all_trend_series:
             min_len = min(len(s) for s in all_trend_series)
-            avg_trend = np.mean([s[:min_len] for s in all_trend_series], axis=0)
-            avg_seasonal = np.mean([s[:min_len] for s in all_seasonal_series], axis=0)
-            avg_residual = np.mean([s[:min_len] for s in all_residual_series], axis=0)
+            max_series_len = 500
+            if min_len > max_series_len:
+                step = min_len // max_series_len
+                indices = np.arange(0, min_len, step)[:max_series_len]
+            else:
+                indices = np.arange(min_len)
+            
+            avg_trend = np.mean([s[:min_len] for s in all_trend_series], axis=0)[indices]
+            avg_seasonal = np.mean([s[:min_len] for s in all_seasonal_series], axis=0)[indices]
+            avg_residual = np.mean([s[:min_len] for s in all_residual_series], axis=0)[indices]
             
             details["series"] = {
                 "trend": avg_trend.tolist(),
                 "seasonal": avg_seasonal.tolist(),
                 "residual": avg_residual.tolist(),
-                "length": min_len,
+                "length": len(indices),
+                "original_length": min_len,
             }
         
         return {
@@ -154,248 +323,7 @@ class STLAnalyzer:
             "dataset": dataset,
             "data_type": data_type,
             "method": method,
-            "metrics": metrics,
-            "details": details,
-            "success": True,
-        }
-
-
-class FFTAnalyzer:
-    """FFT 频域分析器"""
-    
-    def __init__(self, low_freq_ratio: float = 0.1):
-        self.low_freq_ratio = low_freq_ratio
-    
-    def analyze(
-        self,
-        data: pd.DataFrame,
-        dataset: str = "",
-        data_type: str = "",
-        method: str = "",
-        save_series: bool = True,
-    ) -> Dict[str, Any]:
-        """
-        执行 FFT 频域分析
-        
-        Args:
-            data: 时间序列数据
-            dataset: 数据集名称
-            data_type: 数据类型
-            method: 填补方法
-            save_series: 是否保存序列数据
-            
-        Returns:
-            分析结果字典
-        """
-        data_cols = get_data_cols(data)
-        
-        all_dominant_freq = []
-        all_low_freq_energy_ratio = []
-        all_high_freq_energy_ratio = []
-        all_spectral_entropy = []
-        
-        all_freqs = []
-        all_magnitudes = []
-        
-        for col in data_cols:
-            series = data[col].dropna().values
-            
-            if len(series) < 10:
-                continue
-            
-            try:
-                series = series - np.mean(series)
-                
-                fft_result = np.fft.fft(series)
-                fft_magnitude = np.abs(fft_result)
-                
-                n = len(series)
-                freqs = np.fft.fftfreq(n)
-                
-                positive_mask = freqs > 0
-                positive_freqs = freqs[positive_mask]
-                positive_magnitude = fft_magnitude[positive_mask]
-                
-                if len(positive_magnitude) == 0:
-                    continue
-                
-                dominant_idx = np.argmax(positive_magnitude)
-                dominant_freq = positive_freqs[dominant_idx]
-                all_dominant_freq.append(dominant_freq)
-                
-                total_energy = np.sum(positive_magnitude ** 2)
-                if total_energy > 0:
-                    energy = positive_magnitude ** 2
-                    
-                    low_freq_threshold = self.low_freq_ratio * np.max(positive_freqs)
-                    low_freq_mask = positive_freqs <= low_freq_threshold
-                    
-                    low_freq_energy = np.sum(energy[low_freq_mask])
-                    high_freq_energy = np.sum(energy[~low_freq_mask])
-                    
-                    all_low_freq_energy_ratio.append(low_freq_energy / total_energy)
-                    all_high_freq_energy_ratio.append(high_freq_energy / total_energy)
-                    
-                    energy_normalized = energy / total_energy
-                    energy_normalized = energy_normalized[energy_normalized > 0]
-                    entropy = -np.sum(energy_normalized * np.log2(energy_normalized))
-                    all_spectral_entropy.append(entropy)
-                    
-                    if save_series:
-                        all_freqs.append(positive_freqs)
-                        all_magnitudes.append(positive_magnitude)
-                    
-            except Exception as e:
-                print(f"    [警告] FFT 分析失败 {col}: {e}")
-                continue
-        
-        if not all_dominant_freq:
-            return {
-                "analyzer": "FFT",
-                "dataset": dataset,
-                "data_type": data_type,
-                "method": method,
-                "metrics": {},
-                "details": {},
-                "success": False,
-                "error": "No valid series for FFT analysis",
-            }
-        
-        metrics = {
-            "dominant_freq": float(np.mean(all_dominant_freq)),
-            "low_freq_energy_ratio": float(np.mean(all_low_freq_energy_ratio)),
-            "high_freq_energy_ratio": float(np.mean(all_high_freq_energy_ratio)),
-            "spectral_entropy": float(np.mean(all_spectral_entropy)),
-        }
-        
-        details = {
-            "n_series": len(all_dominant_freq),
-            "low_freq_threshold_ratio": self.low_freq_ratio,
-        }
-        
-        if save_series and all_freqs:
-            min_len = min(len(f) for f in all_freqs)
-            avg_freqs = np.mean([f[:min_len] for f in all_freqs], axis=0)
-            avg_magnitudes = np.mean([m[:min_len] for m in all_magnitudes], axis=0)
-            
-            details["series"] = {
-                "freqs": avg_freqs.tolist(),
-                "magnitude": avg_magnitudes.tolist(),
-                "length": min_len,
-            }
-        
-        return {
-            "analyzer": "FFT",
-            "dataset": dataset,
-            "data_type": data_type,
-            "method": method,
-            "metrics": metrics,
-            "details": details,
-            "success": True,
-        }
-
-
-class ACFAnalyzer:
-    """ACF 自相关分析器"""
-    
-    def __init__(self, max_lag: int = 40):
-        self.max_lag = max_lag
-    
-    def analyze(
-        self,
-        data: pd.DataFrame,
-        dataset: str = "",
-        data_type: str = "",
-        method: str = "",
-        save_series: bool = True,
-    ) -> Dict[str, Any]:
-        """
-        执行 ACF 自相关分析
-        
-        Args:
-            data: 时间序列数据
-            dataset: 数据集名称
-            data_type: 数据类型
-            method: 填补方法
-            save_series: 是否保存序列数据
-            
-        Returns:
-            分析结果字典
-        """
-        data_cols = get_data_cols(data)
-        
-        lags = [10, 20, 30, 40]
-        all_acf_values = {lag: [] for lag in lags}
-        all_decay_rates = []
-        all_acf_series = []
-        
-        for col in data_cols:
-            series = data[col].dropna().values
-            
-            if len(series) < self.max_lag + 1:
-                continue
-            
-            try:
-                acf_values = acf(series, nlags=self.max_lag, fft=True)
-                
-                for lag in lags:
-                    if lag < len(acf_values):
-                        all_acf_values[lag].append(acf_values[lag])
-                
-                positive_acf = acf_values[acf_values > 0]
-                if len(positive_acf) > 1:
-                    x = np.arange(len(positive_acf))
-                    log_acf = np.log(positive_acf + 1e-10)
-                    slope = np.polyfit(x, log_acf, 1)[0]
-                    all_decay_rates.append(-slope)
-                
-                if save_series:
-                    all_acf_series.append(acf_values)
-                    
-            except Exception as e:
-                print(f"    [警告] ACF 分析失败 {col}: {e}")
-                continue
-        
-        if not all_decay_rates:
-            return {
-                "analyzer": "ACF",
-                "dataset": dataset,
-                "data_type": data_type,
-                "method": method,
-                "metrics": {},
-                "details": {},
-                "success": False,
-                "error": "No valid series for ACF analysis",
-            }
-        
-        metrics = {}
-        for lag in lags:
-            if all_acf_values[lag]:
-                metrics[f"acf_lag_{lag}"] = float(np.mean(all_acf_values[lag]))
-        
-        metrics["decay_rate"] = float(np.mean(all_decay_rates))
-        
-        details = {
-            "n_series": len(all_decay_rates),
-            "max_lag": self.max_lag,
-        }
-        
-        if save_series and all_acf_series:
-            min_len = min(len(s) for s in all_acf_series)
-            avg_acf = np.mean([s[:min_len] for s in all_acf_series], axis=0)
-            
-            details["series"] = {
-                "acf": avg_acf.tolist(),
-                "lags": list(range(min_len)),
-                "length": min_len,
-            }
-        
-        return {
-            "analyzer": "ACF",
-            "dataset": dataset,
-            "data_type": data_type,
-            "method": method,
-            "metrics": metrics,
+            "metrics": avg_metrics,
             "details": details,
             "success": True,
         }
@@ -485,7 +413,7 @@ def print_comparison(comparison: Dict[str, Any], imputed_methods: List[str] = No
     print(f"{'='*80}")
     
     col_width = 12
-    header_line = f"{'指标':<15} {'Ori':<{col_width}} {'Missing':<{col_width}}"
+    header_line = f"{'指标':<25} {'Ori':<{col_width}} {'Missing':<{col_width}}"
     for method in imputed_methods:
         header_line += f" {method:<{col_width}}"
     print(header_line)
@@ -493,18 +421,18 @@ def print_comparison(comparison: Dict[str, Any], imputed_methods: List[str] = No
     
     for metric_name, metric_data in metrics.items():
         ori_val = metric_data.get("ori", 0)
-        missing_val = metric_data.get("missing", "-")
+        missing_val = metric_data.get("missing")
         
-        line = f"{metric_name:<15} {ori_val:<{col_width}.4f}"
+        line = f"{metric_name:<25} {ori_val:<{col_width}.4f}"
         
-        if missing_val != "-":
+        if missing_val is not None:
             line += f" {missing_val:<{col_width}.4f}"
         else:
             line += f" {'-':<{col_width}}"
         
         for method in imputed_methods:
-            val = metric_data.get("imputed", {}).get(method, "-")
-            if val != "-":
+            val = metric_data.get("imputed", {}).get(method)
+            if val is not None:
                 line += f" {val:<{col_width}.4f}"
             else:
                 line += f" {'-':<{col_width}}"
@@ -515,19 +443,18 @@ def print_comparison(comparison: Dict[str, Any], imputed_methods: List[str] = No
     print("与Ori的差异 (%):")
     
     for metric_name, metric_data in metrics.items():
-        ori_val = metric_data.get("ori", 0)
-        missing_diff = metric_data.get("missing_diff_pct", "-")
+        missing_diff = metric_data.get("missing_diff_pct")
         
-        line = f"{metric_name:<15} {'-':<{col_width}}"
+        line = f"{metric_name:<25} {'-':<{col_width}}"
         
-        if missing_diff != "-":
+        if missing_diff is not None:
             line += f" {missing_diff:>+{col_width-2}.1f}%"
         else:
             line += f" {'-':<{col_width}}"
         
         for method in imputed_methods:
-            diff = metric_data.get("imputed_diff_pct", {}).get(method, "-")
-            if diff != "-":
+            diff = metric_data.get("imputed_diff_pct", {}).get(method)
+            if diff is not None:
                 line += f" {diff:>+{col_width-2}.1f}%"
             else:
                 line += f" {'-':<{col_width}}"
@@ -573,3 +500,25 @@ def get_best_method(comparison: Dict[str, Any], imputed_methods: List[str] = Non
             best_method = method
     
     return best_method, best_score
+
+
+if __name__ == "__main__":
+    np.random.seed(42)
+    
+    n = 200
+    period = 24
+    t = np.arange(n)
+    
+    trend = 0.05 * t + 10
+    seasonal = 5 * np.sin(2 * np.pi * t / period)
+    residual = np.random.normal(0, 1, n)
+    original = trend + seasonal + residual
+    
+    metrics = calculate_all_metrics(original, trend, seasonal, residual, period)
+    
+    print("=" * 60)
+    print("时间序列特征指标计算结果")
+    print("=" * 60)
+    for name, value in metrics.items():
+        print(f"{name:25s}: {value:.4f}")
+    print("=" * 60)
