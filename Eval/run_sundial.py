@@ -316,7 +316,104 @@ def run_evaluation(
     output_path = Path(output_subdir) / output_filename
     save_results_to_csv(results, str(output_path))
     
+    # 保存中间预测结果
+    save_intermediate_predictions(
+        results=results,
+        dataset_name=original_name,
+        eval_data_name=eval_name,
+        base_output_dir="datasets/Intermediate_Predictions",
+    )
+    
     return results
+
+
+def save_intermediate_predictions(
+    results: dict,
+    dataset_name: str,
+    eval_data_name: str,
+    base_output_dir: str = "datasets/Intermediate_Predictions",
+):
+    """
+    保存中间预测结果，按窗口拆分保存
+    
+    Args:
+        results: evaluate_sundial 返回的结果字典，包含 forecasts 等信息
+        dataset_name: 数据集名称（如 ETTh1, exchange_rate）
+        eval_data_name: 评估数据集名称（如 ETTh1_MCAR_005_short）
+        base_output_dir: 输出基础目录
+    """
+    import pandas as pd
+    import numpy as np
+    from pandas.tseries.frequencies import to_offset
+    
+    # 检查是否有预测结果
+    if 'forecasts' not in results:
+        print(f"\nWarning: No forecasts found in results, skipping intermediate prediction saving")
+        return
+    
+    forecasts = results['forecasts']
+    prediction_length = results['prediction_length']
+    freq = results['freq']
+    
+    print(f"\n{'='*80}")
+    print(f"Saving Intermediate Predictions")
+    print(f"{'='*80}")
+    print(f"  Dataset: {dataset_name}")
+    print(f"  Eval data: {eval_data_name}")
+    print(f"  Prediction length: {prediction_length}")
+    print(f"  Frequency: {freq}")
+    print(f"  Number of windows: {len(forecasts)}")
+    
+    # 创建输出目录
+    output_dir = Path(base_output_dir) / dataset_name
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # 遍历每个窗口的预测结果
+    for window_idx, forecast in enumerate(forecasts):
+        # 提取 mean 和中位数（0.5 分位数）
+        mean_prediction = forecast.mean  # shape: (prediction_length,)
+        median_prediction = forecast.quantile(0.5)  # shape: (prediction_length,)
+        
+        # 生成时间序列
+        start_date = forecast.start_date
+        # 如果 start_date 是 Period 对象，转换为 Timestamp
+        if hasattr(start_date, 'to_timestamp'):
+            start_date = start_date.to_timestamp()
+        date_range = pd.date_range(
+            start=start_date,
+            periods=prediction_length,
+            freq=freq
+        )
+        
+        # 保存 mean 预测结果
+        df_mean = pd.DataFrame({
+            'date': date_range,
+            'prediction': mean_prediction,
+        })
+        output_filename_mean = f"{eval_data_name}_prediction[mean]_{window_idx}.csv"
+        output_path_mean = output_dir / output_filename_mean
+        df_mean.to_csv(output_path_mean, index=False)
+        
+        # 保存 median 预测结果
+        df_median = pd.DataFrame({
+            'date': date_range,
+            'prediction': median_prediction,
+        })
+        output_filename_median = f"{eval_data_name}_prediction[0.5]_{window_idx}.csv"
+        output_path_median = output_dir / output_filename_median
+        df_median.to_csv(output_path_median, index=False)
+        
+        if window_idx == 0:
+            print(f"\n  Sample output (window 0):")
+            print(f"    Mean file: {output_path_mean}")
+            print(f"    Median file: {output_path_median}")
+            print(f"    Shape: {df_mean.shape}")
+            print(f"    Mean range: [{mean_prediction.min():.4f}, {mean_prediction.max():.4f}]")
+            print(f"    Median range: [{median_prediction.min():.4f}, {median_prediction.max():.4f}]")
+            print(f"    Date range: {date_range[0]} to {date_range[-1]}")
+    
+    print(f"\n  ✅ Saved {len(forecasts)} × 2 prediction files to: {output_dir}")
+    print(f"{'='*80}\n")
 
 
 def batch_evaluate(
@@ -445,6 +542,14 @@ def batch_evaluate(
                 output_path = Path(output_subdir) / output_filename
                 save_results_to_csv(results, str(output_path))
                 print(f"    ✅ Results saved to: {output_path}")
+                
+                # 保存中间预测结果
+                save_intermediate_predictions(
+                    results=results,
+                    dataset_name=dataset_name,
+                    eval_data_name=eval_name,
+                    base_output_dir="datasets/Intermediate_Predictions",
+                )
                 
                 all_results.append((eval_path, term, impute_method, results))
                 

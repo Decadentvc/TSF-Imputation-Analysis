@@ -30,7 +30,7 @@ warnings.filterwarnings('ignore', category=FutureWarning, message=".*'H' is depr
 MAX_CONTEXT_SUNDIAL = 2880
 
 # 测试集比例
-TEST_SPLIT = 0.1
+TEST_SPLIT = 0.6
 
 # 最大窗口数
 MAX_WINDOW = 20
