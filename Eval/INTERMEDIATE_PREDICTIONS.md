@@ -87,11 +87,7 @@ datasets/Intermediate_Predictions/ETTh1/ETTh1_MCAR_005_short_prediction_*.csv
 ### 批量评估
 
 ```bash
-python Eval/run_sundial.py batch \
-    --dataset ETTh1 \
-    --method MCAR \
-    --missing_ratios 0.05,0.10 \
-    --imputation_methods none,zero,mean
+python Eval/run_sundial.py batch --dataset ETTh1 --method BM --missing_ratios 0.10,0.20,0.30 --imputation_methods mean,forward,backward,linear
 ```
 
 批量评估会为每个评估数据集和每个填补方法都保存中间预测结果。
