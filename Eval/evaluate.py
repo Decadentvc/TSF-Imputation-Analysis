@@ -39,7 +39,7 @@ from gluonts.dataset.split import split
 
 
 MAX_CONTEXT_SUNDIAL = 2880
-TEST_SPLIT = 0.1
+TEST_SPLIT = 0.6
 MAX_WINDOW = 20
 
 
