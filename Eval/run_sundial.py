@@ -6,9 +6,10 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 
-from eval_sundial import evaluate_sundial, save_results_to_csv, get_imputation_method
+from eval_sundial import evaluate_sundial, save_results_to_csv
+from impute_dataset import impute_dataset, generate_imputed_dataset_path
 
 
 def parse_eval_dataset_name(eval_path: str) -> Tuple[str, str]:
@@ -141,11 +142,91 @@ def get_allowed_terms(
         return ["short", "medium", "long"]
 
 
+def check_and_impute_dataset(
+    eval_data_path: str,
+    imputation_method: str,
+    base_output_dir: str = "datasets/Imputed",
+) -> str:
+    """
+    检查填补后的数据集是否存在，如果不存在则进行填补
+    
+    Args:
+        eval_data_path: 原评估数据集路径
+        imputation_method: 填补方法名称
+        base_output_dir: 填补数据集输出基础目录
+    
+    Returns:
+        填补后的数据集路径
+    """
+    if imputation_method.lower() == 'none':
+        return eval_data_path
+    
+    imputed_path = generate_imputed_dataset_path(
+        eval_data_path=eval_data_path,
+        imputation_method=imputation_method,
+        base_output_dir=base_output_dir,
+    )
+    
+    if Path(imputed_path).exists():
+        print(f"  ✓ Imputed dataset exists: {imputed_path}")
+        return imputed_path
+    
+    print(f"  ⚠ Imputed dataset not found, generating...")
+    impute_dataset(
+        eval_data_path=eval_data_path,
+        imputation_method=imputation_method,
+        output_path=imputed_path,
+        base_output_dir=base_output_dir,
+        save_result=True,
+    )
+    
+    return imputed_path
+
+
+def batch_check_and_impute(
+    eval_data_paths: List[str],
+    imputation_methods: List[str],
+    base_output_dir: str = "datasets/Imputed",
+) -> dict:
+    """
+    批量检查并填补数据集
+    
+    Args:
+        eval_data_paths: 评估数据集路径列表
+        imputation_methods: 填补方法列表
+        base_output_dir: 填补数据集输出基础目录
+    
+    Returns:
+        字典，键为 (eval_path, imputation_method)，值为填补后的数据集路径
+    """
+    imputed_paths_map = {}
+    
+    print(f"\n{'='*80}")
+    print(f"Checking and Generating Imputed Datasets")
+    print(f"{'='*80}")
+    print(f"  Eval datasets: {len(eval_data_paths)}")
+    print(f"  Imputation methods: {imputation_methods}")
+    
+    for eval_path in eval_data_paths:
+        for method in imputation_methods:
+            imputed_path = check_and_impute_dataset(
+                eval_data_path=eval_path,
+                imputation_method=method,
+                base_output_dir=base_output_dir,
+            )
+            imputed_paths_map[(eval_path, method)] = imputed_path
+    
+    print(f"{'='*80}\n")
+    
+    return imputed_paths_map
+
+
 def generate_eval_dataset_paths(
     dataset_name: str,
     method: str,
     missing_ratios: list = None,
-    base_data_dir: str = "datasets"
+    base_data_dir: str = "datasets",
+    block_length: int = None,
 ) -> list:
     """
     生成一系列评估数据集的路径
@@ -155,6 +236,7 @@ def generate_eval_dataset_paths(
         method: 注空模式（MCAR, BM, TM, TVMR）
         missing_ratios: 缺失比例列表，默认为 [0.05, 0.10, 0.15, 0.20, 0.25, 0.30]
         base_data_dir: 基础数据集目录
+        block_length: 块长度（仅用于 BM 模式）
     
     Returns:
         评估数据集路径列表，每个元素为 (eval_path, term) 元组
@@ -172,7 +254,11 @@ def generate_eval_dataset_paths(
         
         for term in allowed_terms:
             # 构建评估数据集文件名
-            eval_filename = f"{dataset_name}_{method}_{ratio_str}_{term}.csv"
+            # 对于 BM 模式，文件名中包含块长度信息
+            if method == "BM" and block_length is not None:
+                eval_filename = f"{dataset_name}_{method}_length{block_length}_{ratio_str}_{term}.csv"
+            else:
+                eval_filename = f"{dataset_name}_{method}_{ratio_str}_{term}.csv"
             
             # 构建完整路径：datasets/[method]/[method]_[ratio]/[filename]
             eval_path = Path(base_data_dir) / method / f"{method}_{ratio_str}" / eval_filename
@@ -281,9 +367,16 @@ def run_evaluation(
     freq = get_frequency_from_properties(original_name, properties_path)
     print(f"  Frequency: {freq}")
     
-    print(f"\nStep 4: Running evaluation")
-    results = evaluate_sundial(
+    print(f"\nStep 4: Checking and generating imputed dataset")
+    actual_eval_path = check_and_impute_dataset(
         eval_data_path=str(eval_path),
+        imputation_method=imputation_method,
+        base_output_dir="datasets/Imputed",
+    )
+    
+    print(f"\nStep 5: Running evaluation")
+    results = evaluate_sundial(
+        eval_data_path=actual_eval_path,
         clean_data_path=clean_path,
         freq=freq,
         term=term,
@@ -293,10 +386,10 @@ def run_evaluation(
         device=device,
         debug=False,
         debug_samples=5,
-        imputation_method=imputation_method,
+        imputation_method=None,  # 填补已经在 Step 4 完成
     )
     
-    print(f"\nStep 5: Saving results")
+    print(f"\nStep 6: Saving results")
     eval_name = eval_path.stem
     
     # 根据填补方法确定输出目录
@@ -344,7 +437,6 @@ def save_intermediate_predictions(
     """
     import pandas as pd
     import numpy as np
-    from pandas.tseries.frequencies import to_offset
     
     # 检查是否有预测结果
     if 'forecasts' not in results:
@@ -364,15 +456,14 @@ def save_intermediate_predictions(
     print(f"  Frequency: {freq}")
     print(f"  Number of windows: {len(forecasts)}")
     
-    # 创建输出目录
-    output_dir = Path(base_output_dir) / dataset_name
+    # 创建输出目录：base_output_dir/[eval_data_name]_prediction/
+    output_dir = Path(base_output_dir) / f"{eval_data_name}_prediction"
     output_dir.mkdir(parents=True, exist_ok=True)
     
     # 遍历每个窗口的预测结果
     for window_idx, forecast in enumerate(forecasts):
-        # 提取 mean 和中位数（0.5 分位数）
+        # 提取 mean 预测值
         mean_prediction = forecast.mean  # shape: (prediction_length,)
-        median_prediction = forecast.quantile(0.5)  # shape: (prediction_length,)
         
         # 生成时间序列
         start_date = forecast.start_date
@@ -385,34 +476,25 @@ def save_intermediate_predictions(
             freq=freq
         )
         
-        # 保存 mean 预测结果
-        df_mean = pd.DataFrame({
+        # 创建 DataFrame：只包含时序列和 mean 预测值
+        df = pd.DataFrame({
             'date': date_range,
             'prediction': mean_prediction,
         })
-        output_filename_mean = f"{eval_data_name}_prediction[mean]_{window_idx}.csv"
-        output_path_mean = output_dir / output_filename_mean
-        df_mean.to_csv(output_path_mean, index=False)
         
-        # 保存 median 预测结果
-        df_median = pd.DataFrame({
-            'date': date_range,
-            'prediction': median_prediction,
-        })
-        output_filename_median = f"{eval_data_name}_prediction[0.5]_{window_idx}.csv"
-        output_path_median = output_dir / output_filename_median
-        df_median.to_csv(output_path_median, index=False)
+        # 文件命名：[eval_data_name]_prediction_[window_index].csv
+        output_filename = f"{eval_data_name}_prediction_{window_idx}.csv"
+        output_path = output_dir / output_filename
+        df.to_csv(output_path, index=False)
         
         if window_idx == 0:
             print(f"\n  Sample output (window 0):")
-            print(f"    Mean file: {output_path_mean}")
-            print(f"    Median file: {output_path_median}")
-            print(f"    Shape: {df_mean.shape}")
+            print(f"    File: {output_path}")
+            print(f"    Shape: {df.shape}")
             print(f"    Mean range: [{mean_prediction.min():.4f}, {mean_prediction.max():.4f}]")
-            print(f"    Median range: [{median_prediction.min():.4f}, {median_prediction.max():.4f}]")
             print(f"    Date range: {date_range[0]} to {date_range[-1]}")
     
-    print(f"\n  ✅ Saved {len(forecasts)} × 2 prediction files to: {output_dir}")
+    print(f"\n  ✅ Saved {len(forecasts)} prediction windows to: {output_dir}")
     print(f"{'='*80}\n")
 
 
@@ -428,6 +510,7 @@ def batch_evaluate(
     batch_size: int = 32,
     device: str = "cpu",
     imputation_methods: list = None,
+    block_length: int = None,
 ) -> list:
     """
     一键评估功能：批量评估所有缺失率和 term 组合
@@ -441,9 +524,10 @@ def batch_evaluate(
         output_dir: 输出目录
         prediction_length: 预测长度
         num_samples: 采样数
-        batch_size: 批次大小
-        device: 设备
-        imputation_methods: 填补方法列表，默认为 None（使用所有填补方法）
+        batch_size: 批量大小
+        device: 设备类型
+        imputation_methods: 填补方法列表
+        block_length: 块长度（仅用于 BM 模式），默认为 None（使用所有填补方法）
     
     Returns:
         评估结果列表，每个元素为 (eval_path, term, imputation_method, results) 元组
@@ -470,6 +554,7 @@ def batch_evaluate(
         method=method,
         missing_ratios=missing_ratios,
         base_data_dir=base_data_dir,
+        block_length=block_length,
     )
     print(f"  Found {len(eval_paths)} eval datasets to evaluate")
     
@@ -483,8 +568,16 @@ def batch_evaluate(
     freq = get_frequency_from_properties(dataset_name, properties_path)
     print(f"  Frequency: {freq}")
     
-    # Step 4: 批量评估（对每个数据集使用不同的填补方法依次评估）
-    print(f"\nStep 4: Running batch evaluation")
+    # Step 4: 批量检查并生成填补数据集
+    eval_path_list = [eval_path for eval_path, _ in eval_paths]
+    imputed_paths_map = batch_check_and_impute(
+        eval_data_paths=eval_path_list,
+        imputation_methods=imputation_methods,
+        base_output_dir="datasets/Imputed",
+    )
+    
+    # Step 5: 批量评估（对每个数据集使用不同的填补方法依次评估）
+    print(f"\nStep 5: Running batch evaluation")
     all_results = []
     
     for idx, (eval_path, term) in enumerate(eval_paths, 1):
@@ -504,9 +597,12 @@ def batch_evaluate(
             print(f"\n  Applying imputation method: {impute_method}")
             
             try:
-                # 运行评估（每次重新读取原始数据并应用不同的填补方法）
+                # 获取填补后的数据集路径
+                actual_eval_path = imputed_paths_map.get((eval_path, impute_method), eval_path)
+                
+                # 运行评估（使用填补后的数据集）
                 results = evaluate_sundial(
-                    eval_data_path=eval_path,
+                    eval_data_path=actual_eval_path,
                     clean_data_path=clean_path,
                     freq=freq,
                     term=term,
@@ -516,7 +612,7 @@ def batch_evaluate(
                     device=device,
                     debug=False,
                     debug_samples=5,
-                    imputation_method=impute_method,
+                    imputation_method=None,  # 填补已经在 Step 4 完成
                 )
                 
                 # 保存结果
@@ -559,7 +655,7 @@ def batch_evaluate(
                 traceback.print_exc()
                 continue
     
-    # Step 5: 汇总结果
+    # Step 6: 汇总结果
     print(f"\n{'='*80}")
     print(f"Batch Evaluation Complete")
     print(f"  Total: {len(eval_paths)} datasets × {len(imputation_methods)} imputation methods = {len(eval_paths) * len(imputation_methods)} evaluations")
@@ -717,6 +813,12 @@ def main():
         default=None,
         help="Comma-separated imputation methods (e.g., 'none,zero,mean'). Default: all methods (none,zero,mean,forward,backward,linear,nearest,spline,seasonal)",
     )
+    batch_parser.add_argument(
+        "--block_length",
+        type=int,
+        default=None,
+        help="Block length for BM pattern (default: None, only used for BM method)",
+    )
     
     args = main_parser.parse_args()
     
@@ -765,6 +867,7 @@ def main():
                 batch_size=args.batch_size,
                 device=args.device,
                 imputation_methods=imputation_methods,
+                block_length=args.block_length,
             )
     except Exception as e:
         print(f"\n❌ Error during evaluation: {e}", file=sys.stderr)

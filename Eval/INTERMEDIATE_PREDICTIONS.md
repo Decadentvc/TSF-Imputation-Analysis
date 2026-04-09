@@ -7,48 +7,51 @@
 ## 功能特性
 
 1. **按窗口拆分保存**：每个预测窗口的结果保存为独立文件
-2. **分离保存统计量**：mean 和 median 分别保存为两个独立文件
-3. **包含时间序列**：每个文件不仅包含预测值，还包含对应的时间序列
-4. **自动创建目录结构**：根据数据集名称自动创建子目录
+2. **只保存关键信息**：每个文件包含时序列和 mean 预测值
+3. **按评估任务组织**：根据评估任务名称创建子目录，同一任务的所有窗口预测结果保存在同一目录
+4. **自动创建目录结构**：根据评估数据集名称自动创建子目录
 5. **单次和批量评估均支持**：两种评估模式都会自动保存中间结果
 
 ## 保存路径
 
 ```
 datasets/Intermediate_Predictions/
-├── ETTh1/
-│   ├── ETTh1_MCAR_005_short_prediction[mean]_0.csv
-│   ├── ETTh1_MCAR_005_short_prediction[mean]_1.csv
-│   ├── ETTh1_MCAR_005_short_prediction[0.5]_0.csv
-│   ├── ETTh1_MCAR_005_short_prediction[0.5]_1.csv
+├── ETTh1_MCAR_005_short_prediction/
+│   ├── ETTh1_MCAR_005_short_prediction_0.csv
+│   ├── ETTh1_MCAR_005_short_prediction_1.csv
+│   ├── ETTh1_MCAR_005_short_prediction_2.csv
 │   └── ...
-├── ETTh2/
+├── ETTh1_BM_010_long_prediction/
+│   ├── ETTh1_BM_010_long_prediction_0.csv
+│   ├── ETTh1_BM_010_long_prediction_1.csv
 │   └── ...
-└── exchange_rate/
+└── exchange_rate_MCAR_005_medium_prediction/
+    ├── exchange_rate_MCAR_005_medium_prediction_0.csv
     └── ...
 ```
 
+## 目录结构
+
+每个评估任务创建一个子目录，命名格式：
+
+```
+[eval_data_name]_prediction/
+```
+
+示例：
+- `ETTh1_MCAR_005_short_prediction/` - ETTh1 数据集，MCAR 模式，5% 缺失率，short term 的预测结果
+- `ETTh1_BM_010_long_prediction/` - ETTh1 数据集，BM 模式，10% 缺失率，long term 的预测结果
+
 ## 文件命名格式
 
-### mean 预测结果
-
 ```
-[eval_data_name]_prediction[mean]_[window_index].csv
+[eval_data_name]_prediction_[window_index].csv
 ```
 
 示例：
-- `ETTh1_MCAR_005_short_prediction[mean]_0.csv`
-- `ETTh1_MCAR_005_short_prediction[mean]_1.csv`
-
-### median 预测结果
-
-```
-[eval_data_name]_prediction[0.5]_[window_index].csv
-```
-
-示例：
-- `ETTh1_MCAR_005_short_prediction[0.5]_0.csv`
-- `ETTh1_MCAR_005_short_prediction[0.5]_1.csv`
+- `ETTh1_MCAR_005_short_prediction_0.csv` - 第 0 个预测窗口
+- `ETTh1_MCAR_005_short_prediction_1.csv` - 第 1 个预测窗口
+- `ETTh1_MCAR_005_short_prediction_2.csv` - 第 2 个预测窗口
 
 ## 文件内容格式
 
@@ -57,7 +60,7 @@ datasets/Intermediate_Predictions/
 | 列名 | 说明 |
 |------|------|
 | `date` | 时间序列（从预测窗口的起始时间开始） |
-| `prediction` | 预测值（mean 或 median） |
+| `prediction` | 预测值（mean） |
 
 示例：
 ```csv
@@ -73,10 +76,7 @@ date,prediction
 ### 单次评估
 
 ```bash
-python Eval/run_sundial.py single \
-    --eval_data_path datasets/MCAR/MCAR_005/ETTh1_MCAR_005_short.csv \
-    --imputation_method none \
-    --device cpu
+python Eval/run_sundial.py --eval_data_path datasets/MCAR/MCAR_005/ETTh1_BM_short.csv  --clean_data_path datasets/MCAR/MCAR_005/ETTh1_MCAR_005_short.csv  --term short --imputation_method none    --device cpu
 ```
 
 评估完成后，中间预测结果会自动保存到：
@@ -101,17 +101,16 @@ Saving Intermediate Predictions
   Dataset: ETTh1
   Eval data: ETTh1_MCAR_005_short
   Prediction length: 48
+  Frequency: H
   Number of windows: 20
 
   Sample output (window 0):
-    Mean file: datasets/Intermediate_Predictions/ETTh1/ETTh1_MCAR_005_short_prediction[mean]_0.csv
-    Median file: datasets/Intermediate_Predictions/ETTh1/ETTh1_MCAR_005_short_prediction[0.5]_0.csv
+    File: datasets/Intermediate_Predictions/ETTh1_MCAR_005_short_prediction/ETTh1_MCAR_005_short_prediction_0.csv
     Shape: (48, 2)
     Mean range: [10.5573, 13.7013]
-    Median range: [10.9443, 13.6023]
     Date range: 2018-05-17 20:00:00 to 2018-05-19 19:00:00
 
-  ✅ Saved 20 × 2 prediction files to: datasets/Intermediate_Predictions/ETTh1
+  ✅ Saved 20 prediction windows to: datasets/Intermediate_Predictions/ETTh1_MCAR_005_short_prediction
 ================================================================================
 ```
 
@@ -188,4 +187,4 @@ windows = (dataset_length - prediction_length) // prediction_length
 
 **创建时间**：2026-04-08
 **版本**：1.0
-**作者**：AI Assistant
+

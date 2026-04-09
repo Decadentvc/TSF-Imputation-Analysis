@@ -50,7 +50,7 @@ from Imputation.imputation_methods import (
     none_imputation,
 )
 
-TEST_SPLIT = 0.1
+TEST_SPLIT = 0.6
 MAX_WINDOW = 20
 
 # 填补方法映射
@@ -513,6 +513,7 @@ def evaluate_sundial(
         "prediction_length": pred_len,
         "windows": windows,
         "imputation_method": imputation_method if imputation_method else "none",
+        "forecasts": forecasts,  # 添加预测结果，用于保存中间结果
         "MSE[mean]": float(evaluator["MSE[mean]"].mean()),
         "MSE[0.5]": float(evaluator["MSE[0.5]"].mean()),
         "MAE[0.5]": float(evaluator["MAE[0.5]"].mean()),
