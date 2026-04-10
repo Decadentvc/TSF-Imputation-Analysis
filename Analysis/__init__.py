@@ -1,53 +1,56 @@
 """
 时间序列分析模块
 
-包含 STL 分解、FFT 频域分析、ACF 自相关分析
+包含：
+- metrics: 6 个时间序列特征指标计算
+- window_analysis: 窗口特征分析（预测窗口 + 历史窗口）
+- batch_window_analysis: 批量窗口特征分析
 """
 
-from Analysis.analyzer import (
-    STLAnalyzer,
-    FFTAnalyzer,
-    ACFAnalyzer,
-    load_dataset_properties,
+from Analysis.metrics import (
+    calculate_trend_strength,
+    calculate_trend_linearity,
+    calculate_seasonal_strength,
+    calculate_seasonal_correlation,
+    calculate_residual_autocorr_lag1,
+    calculate_spectral_entropy,
+    calculate_all_metrics,
     get_period,
-    compare_results,
-    print_comparison,
-    calculate_recovery_score,
-    get_best_method,
+    load_dataset_properties,
 )
 
-from Analysis.run_analysis import (
-    run_single_analysis,
+from Analysis.window_analysis import (
+    analyze_prediction_windows,
+    analyze_history_windows,
+    analyze_imputed_history_windows,
+    analyze_single_window,
+    get_available_impute_methods,
+    save_results,
+)
+
+from Analysis.batch_window_analysis import (
     run_batch_analysis,
-    generate_summary_report,
-)
-
-from Analysis.visualize import (
-    visualize_single_result,
-    visualize_all_results,
-    plot_stl_comparison,
-    plot_fft_comparison,
-    plot_acf_comparison,
-    plot_recovery_comparison,
+    get_all_prediction_dirs,
+    get_datasets_with_predictions,
 )
 
 __all__ = [
-    "STLAnalyzer",
-    "FFTAnalyzer",
-    "ACFAnalyzer",
-    "load_dataset_properties",
+    "calculate_trend_strength",
+    "calculate_trend_linearity",
+    "calculate_seasonal_strength",
+    "calculate_seasonal_correlation",
+    "calculate_residual_autocorr_lag1",
+    "calculate_spectral_entropy",
+    "calculate_all_metrics",
     "get_period",
-    "compare_results",
-    "print_comparison",
-    "calculate_recovery_score",
-    "get_best_method",
-    "run_single_analysis",
+    "load_dataset_properties",
+    "analyze_prediction_windows",
+    "analyze_history_windows",
+    "analyze_imputed_history_windows",
+    "analyze_single_window",
+    "get_available_impute_methods",
+    "save_results",
     "run_batch_analysis",
-    "generate_summary_report",
-    "visualize_single_result",
-    "visualize_all_results",
-    "plot_stl_comparison",
-    "plot_fft_comparison",
-    "plot_acf_comparison",
-    "plot_recovery_comparison",
+    "get_all_prediction_dirs",
+    "get_datasets_with_predictions",
 ]

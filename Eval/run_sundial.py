@@ -6,7 +6,14 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import Optional, Tuple, List
+from typing import Any, Dict, List, Optional, Tuple
+
+try:  # pragma: no cover - optional deps
+    import numpy as np
+    import pandas as pd
+except ImportError:  # pragma: no cover
+    np = None  # type: ignore
+    pd = None  # type: ignore
 
 from eval_sundial import evaluate_sundial, save_results_to_csv
 from impute_dataset import impute_dataset, generate_imputed_dataset_path
@@ -224,9 +231,9 @@ def batch_check_and_impute(
 def generate_eval_dataset_paths(
     dataset_name: str,
     method: str,
-    missing_ratios: list = None,
+    missing_ratios: Optional[List[float]] = None,
     base_data_dir: str = "datasets",
-    block_length: int = None,
+    block_length: Optional[int] = None,
 ) -> list:
     """
     生成一系列评估数据集的路径
@@ -251,20 +258,24 @@ def generate_eval_dataset_paths(
     
     for ratio in missing_ratios:
         ratio_str = f"{int(ratio * 100):03d}"  # 3 位编码，如 005, 010
+        ratio_dir = Path(base_data_dir) / method / f"{method}_{ratio_str}"
         
         for term in allowed_terms:
-            # 构建评估数据集文件名
-            # 对于 BM 模式，文件名中包含块长度信息
-            if method == "BM" and block_length is not None:
-                eval_filename = f"{dataset_name}_{method}_length{block_length}_{ratio_str}_{term}.csv"
-            else:
+            eval_path = None
+            if method == "BM":
+                if block_length is not None:
+                    eval_filename = f"{dataset_name}_{method}_length{block_length}_{ratio_str}_{term}.csv"
+                    eval_path = ratio_dir / eval_filename
+                else:
+                    pattern = f"{dataset_name}_{method}_length*_{ratio_str}_{term}.csv"
+                    matches = sorted(ratio_dir.glob(pattern))
+                    if matches:
+                        eval_path = matches[0]
+            if eval_path is None:
                 eval_filename = f"{dataset_name}_{method}_{ratio_str}_{term}.csv"
-            
-            # 构建完整路径：datasets/[method]/[method]_[ratio]/[filename]
-            eval_path = Path(base_data_dir) / method / f"{method}_{ratio_str}" / eval_filename
-            
+                eval_path = ratio_dir / eval_filename
             eval_paths.append((str(eval_path), term))
-    
+
     return eval_paths
     
     with open(props_path, 'r') as f:
@@ -498,10 +509,97 @@ def save_intermediate_predictions(
     print(f"{'='*80}\n")
 
 
+def evaluate_clean(
+    dataset_name: str,
+    term: str = "short",
+    base_data_dir: str = "datasets",
+    properties_path: str = "datasets/dataset_properties.json",
+    output_dir: str = "results/sundial/sundial_Clean",
+    prediction_length: Optional[int] = None,
+    num_samples: int = 100,
+    batch_size: int = 32,
+    device: str = "cpu",
+) -> Dict[str, Any]:
+    """
+    对干净数据进行评估
+    
+    Args:
+        dataset_name: 数据集名称（如 ETTh1, exchange_rate）
+        term: 预测周期 (short, medium, long)
+        base_data_dir: 数据集根目录
+        properties_path: 数据集属性文件路径
+        output_dir: 输出目录
+        prediction_length: 预测长度（可选，不指定则自动计算）
+        num_samples: 采样数
+        batch_size: 批次大小
+        device: 设备
+        
+    Returns:
+        评估结果字典
+    """
+    
+    print(f"\n{'='*80}")
+    print(f"Clean Data Evaluation")
+    print(f"{'='*80}")
+    print(f"  Dataset: {dataset_name}")
+    print(f"  Term: {term}")
+    print(f"  Device: {device}")
+    print(f"{'='*80}")
+    
+    clean_path = Path(base_data_dir) / "ori" / f"{dataset_name}.csv"
+    if not clean_path.exists():
+        raise FileNotFoundError(f"Clean dataset not found: {clean_path}")
+    
+    print(f"\nStep 1: Finding clean dataset")
+    print(f"  Clean dataset: {clean_path}")
+    
+    print(f"\nStep 2: Getting frequency from properties")
+    freq = get_frequency_from_properties(dataset_name, properties_path)
+    print(f"  Frequency: {freq}")
+    
+    print(f"\nStep 3: Running evaluation on clean data")
+    results = evaluate_sundial(
+        eval_data_path=str(clean_path),
+        clean_data_path=str(clean_path),
+        freq=freq,
+        term=term,
+        prediction_length=prediction_length,
+        num_samples=num_samples,
+        batch_size=batch_size,
+        device=device,
+        debug=False,
+        debug_samples=5,
+        imputation_method=None,
+    )
+    
+    print(f"\nStep 4: Saving results")
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+    
+    output_filename = f"{dataset_name}_clean_{term}_results.csv"
+    output_file = output_path / output_filename
+    save_results_to_csv(results, str(output_file))
+    print(f"  Results saved to: {output_file}")
+    
+    print(f"\nStep 5: Saving intermediate predictions")
+    save_intermediate_predictions(
+        results=results,
+        dataset_name=dataset_name,
+        eval_data_name=f"{dataset_name}_clean_{term}",
+        base_output_dir="datasets/Intermediate_Predictions",
+    )
+    
+    print(f"\n{'='*80}")
+    print(f"✅ Clean data evaluation completed")
+    print(f"{'='*80}")
+    
+    return results
+
+
 def batch_evaluate(
     dataset_name: str,
     method: str,
-    missing_ratios: list = None,
+    missing_ratios: Optional[List[float]] = None,
     base_data_dir: str = "datasets",
     properties_path: str = "datasets/dataset_properties.json",
     output_dir: str = "results/sundial/sundial_Missing",
@@ -509,8 +607,8 @@ def batch_evaluate(
     num_samples: int = 100,
     batch_size: int = 32,
     device: str = "cpu",
-    imputation_methods: list = None,
-    block_length: int = None,
+    imputation_methods: Optional[List[str]] = None,
+    block_length: Optional[int] = None,
 ) -> list:
     """
     一键评估功能：批量评估所有缺失率和 term 组合
@@ -820,6 +918,64 @@ def main():
         help="Block length for BM pattern (default: None, only used for BM method)",
     )
     
+    # ========== 模式 3: 干净数据评估 ==========
+    clean_parser = subparsers.add_parser("clean", help="Evaluate clean data (no missing values)")
+    clean_parser.add_argument(
+        "--dataset",
+        type=str,
+        required=True,
+        help="Dataset name (e.g., ETTh1, exchange_rate)",
+    )
+    clean_parser.add_argument(
+        "--term",
+        type=str,
+        default="short",
+        choices=["short", "medium", "long"],
+        help="Prediction term (default: short)",
+    )
+    clean_parser.add_argument(
+        "--base_data_dir",
+        type=str,
+        default="datasets",
+        help="Base directory for datasets (default: datasets)",
+    )
+    clean_parser.add_argument(
+        "--properties_path",
+        type=str,
+        default="datasets/dataset_properties.json",
+        help="Path to dataset_properties.json (default: datasets/dataset_properties.json)",
+    )
+    clean_parser.add_argument(
+        "--output_dir",
+        type=str,
+        default="results/sundial/sundial_Clean",
+        help="Output directory for results (default: results/sundial/sundial_Clean)",
+    )
+    clean_parser.add_argument(
+        "--prediction_length",
+        type=int,
+        default=None,
+        help="Prediction length (if not specified, will be computed automatically)",
+    )
+    clean_parser.add_argument(
+        "--num_samples",
+        type=int,
+        default=100,
+        help="Number of samples for generation (default: 100)",
+    )
+    clean_parser.add_argument(
+        "--batch_size",
+        type=int,
+        default=32,
+        help="Batch size for inference (default: 32)",
+    )
+    clean_parser.add_argument(
+        "--device",
+        type=str,
+        default="cpu",
+        help="Device to run the model (cpu or cuda:X, default: cpu)",
+    )
+    
     args = main_parser.parse_args()
     
     # 如果没有指定模式，显示帮助
@@ -868,6 +1024,18 @@ def main():
                 device=args.device,
                 imputation_methods=imputation_methods,
                 block_length=args.block_length,
+            )
+        elif args.mode == "clean":
+            evaluate_clean(
+                dataset_name=args.dataset,
+                term=args.term,
+                base_data_dir=args.base_data_dir,
+                properties_path=args.properties_path,
+                output_dir=args.output_dir,
+                prediction_length=args.prediction_length,
+                num_samples=args.num_samples,
+                batch_size=args.batch_size,
+                device=args.device,
             )
     except Exception as e:
         print(f"\n❌ Error during evaluation: {e}", file=sys.stderr)
