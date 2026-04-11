@@ -420,12 +420,12 @@ def run_evaluation(
     output_path = Path(output_subdir) / output_filename
     save_results_to_csv(results, str(output_path))
     
-    # 保存中间预测结果
     save_intermediate_predictions(
         results=results,
         dataset_name=original_name,
         eval_data_name=eval_name,
         base_output_dir="datasets/Intermediate_Predictions",
+        imputation_method=imputation_method if imputation_method and imputation_method.lower() != "none" else None,
     )
     
     return results
@@ -436,6 +436,7 @@ def save_intermediate_predictions(
     dataset_name: str,
     eval_data_name: str,
     base_output_dir: str = "datasets/Intermediate_Predictions",
+    imputation_method: Optional[str] = None,
 ):
     """
     保存中间预测结果，按窗口拆分保存
@@ -445,11 +446,11 @@ def save_intermediate_predictions(
         dataset_name: 数据集名称（如 ETTh1, exchange_rate）
         eval_data_name: 评估数据集名称（如 ETTh1_MCAR_005_short）
         base_output_dir: 输出基础目录
+        imputation_method: 填补方法名称（如 linear, mean 等），用于区分不同填补方法的预测结果
     """
     import pandas as pd
     import numpy as np
     
-    # 检查是否有预测结果
     if 'forecasts' not in results:
         print(f"\nWarning: No forecasts found in results, skipping intermediate prediction saving")
         return
@@ -463,12 +464,16 @@ def save_intermediate_predictions(
     print(f"{'='*80}")
     print(f"  Dataset: {dataset_name}")
     print(f"  Eval data: {eval_data_name}")
+    if imputation_method:
+        print(f"  Imputation method: {imputation_method}")
     print(f"  Prediction length: {prediction_length}")
     print(f"  Frequency: {freq}")
     print(f"  Number of windows: {len(forecasts)}")
     
-    # 创建输出目录：base_output_dir/[eval_data_name]_prediction/
-    output_dir = Path(base_output_dir) / f"{eval_data_name}_prediction"
+    if imputation_method:
+        output_dir = Path(base_output_dir) / f"{eval_data_name}_prediction" / imputation_method
+    else:
+        output_dir = Path(base_output_dir) / f"{eval_data_name}_prediction"
     output_dir.mkdir(parents=True, exist_ok=True)
     
     # 遍历每个窗口的预测结果
@@ -587,6 +592,7 @@ def evaluate_clean(
         dataset_name=dataset_name,
         eval_data_name=f"{dataset_name}_clean_{term}",
         base_output_dir="datasets/Intermediate_Predictions",
+        imputation_method=None,
     )
     
     print(f"\n{'='*80}")
@@ -737,12 +743,12 @@ def batch_evaluate(
                 save_results_to_csv(results, str(output_path))
                 print(f"    ✅ Results saved to: {output_path}")
                 
-                # 保存中间预测结果
                 save_intermediate_predictions(
                     results=results,
                     dataset_name=dataset_name,
                     eval_data_name=eval_name,
                     base_output_dir="datasets/Intermediate_Predictions",
+                    imputation_method=impute_method if impute_method and impute_method.lower() != "none" else None,
                 )
                 
                 all_results.append((eval_path, term, impute_method, results))

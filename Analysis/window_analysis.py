@@ -35,19 +35,54 @@ def parse_prediction_dirname(dirname: str) -> Optional[Dict[str, Any]]:
     Returns:
         解析后的字典，包含 dataset, method, length, ratio, term
     """
-    pattern = r'^([A-Za-z0-9_]+?)_(MCAR|BM|TM|TVMR)(?:_length(\d+))?_(\d{3})_(short|medium|long)_prediction$'
+    pattern = r'^([A-Za-z0-9\-_]+?)_(MCAR|BM|TM|TVMR)(?:_length(\d+))?_(\d{3})_(short|medium|long)_prediction$'
     match = re.match(pattern, dirname)
+    if match:
+        return {
+            "dataset": match.group(1),
+            "method": match.group(2),
+            "block_length": int(match.group(3)) if match.group(3) else None,
+            "ratio": int(match.group(4)) / 100.0,
+            "term": match.group(5),
+        }
+    clean_pattern = r'^([A-Za-z0-9\-_]+?)_clean_(short|medium|long)_prediction$'
+    clean_match = re.match(clean_pattern, dirname)
+    if clean_match:
+        return {
+            "dataset": clean_match.group(1),
+            "method": "clean",
+            "block_length": None,
+            "ratio": None,
+            "term": clean_match.group(2),
+        }
+    return None
+
+
+def is_imputation_method_dir(dirname: str) -> bool:
+    """
+    判断是否为填补方法子目录
     
-    if not match:
+    填补方法名称: zero, mean, forward, backward, linear, nearest, spline, seasonal
+    """
+    imputation_methods = ['zero', 'mean', 'forward', 'backward', 'linear', 'nearest', 'spline', 'seasonal']
+    return dirname.lower() in imputation_methods
+
+
+def get_imputation_method_from_path(path: Path) -> Optional[str]:
+    """
+    从路径中提取填补方法名称
+    
+    新目录结构:
+    datasets/Intermediate_Predictions/{eval_data_name}_prediction/{imputation_method}/
+    """
+    if path.name.lower() in ['zero', 'mean', 'forward', 'backward', 'linear', 'nearest', 'spline', 'seasonal']:
+        return path.name.lower()
+    
+    parent = path.parent
+    if parent.name.endswith('_prediction'):
         return None
     
-    return {
-        "dataset": match.group(1),
-        "method": match.group(2),
-        "block_length": int(match.group(3)) if match.group(3) else None,
-        "ratio": int(match.group(4)) / 100.0,
-        "term": match.group(5),
-    }
+    return None
 
 
 def parse_prediction_filename(filename: str) -> Optional[int]:
@@ -149,6 +184,10 @@ def analyze_prediction_windows(
     """
     分析预测目录下所有窗口的特征指标
     
+    支持两种目录结构：
+    1. 干净数据: datasets/Intermediate_Predictions/{dataset}_clean_{term}_prediction/
+    2. 填补数据: datasets/Intermediate_Predictions/{eval_data_name}_prediction/{imputation_method}/
+    
     Args:
         prediction_dir: 预测窗口目录路径
         properties_path: 数据集属性文件路径
@@ -161,22 +200,37 @@ def analyze_prediction_windows(
     if not pred_path.exists():
         raise FileNotFoundError(f"Prediction directory not found: {pred_path}")
     
-    dir_info = parse_prediction_dirname(pred_path.name)
-    if not dir_info:
-        raise ValueError(f"Cannot parse prediction directory name: {pred_path.name}")
+    imputation_method = None
+    dir_info = None
+    
+    if is_imputation_method_dir(pred_path.name):
+        imputation_method = pred_path.name.lower()
+        parent_dir = pred_path.parent
+        dir_info = parse_prediction_dirname(parent_dir.name)
+        if not dir_info:
+            raise ValueError(f"Cannot parse parent directory name: {parent_dir.name}")
+    else:
+        dir_info = parse_prediction_dirname(pred_path.name)
+        if not dir_info:
+            raise ValueError(f"Cannot parse prediction directory name: {pred_path.name}")
     
     print(f"\n{'='*80}")
     print(f"分析预测窗口特征")
     print(f"{'='*80}")
     print(f"  数据集: {dir_info['dataset']}")
     print(f"  方法: {dir_info['method']}")
-    print(f"  缺失比例: {dir_info['ratio']}")
+    if dir_info['ratio'] is not None:
+        print(f"  缺失比例: {dir_info['ratio']}")
     print(f"  Term: {dir_info['term']}")
     if dir_info['block_length']:
         print(f"  块长度: {dir_info['block_length']}")
+    if imputation_method:
+        print(f"  填补方法: {imputation_method}")
     print(f"{'='*80}")
     
-    period = get_period(dir_info['dataset'], properties_path)
+    period = get_period(dir_info['dataset'], properties_path) if dir_info['dataset'] else None
+    if period is None:
+        raise ValueError(f"Dataset name missing for directory: {pred_path.name}")
     print(f"  周期: {period}")
     
     csv_files = sorted(pred_path.glob("*.csv"))
@@ -211,6 +265,7 @@ def analyze_prediction_windows(
             "success": False,
             "error": "No valid windows analyzed",
             "dir_info": dir_info,
+            "imputation_method": imputation_method,
         }
     
     all_metrics = {
@@ -221,11 +276,9 @@ def analyze_prediction_windows(
         "residual_autocorr_lag1": [],
         "spectral_entropy": [],
     }
-    
     for result in window_results:
         for key, value in result["metrics"].items():
             all_metrics[key].append(value)
-    
     summary = {
         "mean": {key: float(np.mean(values)) for key, values in all_metrics.items()},
         "std": {key: float(np.std(values)) for key, values in all_metrics.items()},
@@ -242,6 +295,7 @@ def analyze_prediction_windows(
     return {
         "success": True,
         "dir_info": dir_info,
+        "imputation_method": imputation_method,
         "n_windows": len(window_results),
         "period": period,
         "summary": summary,
@@ -687,12 +741,12 @@ if __name__ == "__main__":
         sys.exit(0)
     
     try:
+        results = None
         if args.mode == "prediction":
             results = analyze_prediction_windows(args.prediction_dir)
         elif args.mode == "history":
             results = analyze_history_windows(args.dataset, args.term)
-        
-        if args.output:
+        if args.output and results is not None:
             save_results(results, args.output)
             
     except Exception as e:

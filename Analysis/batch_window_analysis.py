@@ -11,7 +11,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 from collections import defaultdict
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -23,11 +23,21 @@ from Analysis.window_analysis import (
     get_available_impute_methods,
     save_results,
     parse_prediction_dirname,
+    is_imputation_method_dir,
 )
 
 
 def get_all_prediction_dirs(base_dir: str = "datasets/Intermediate_Predictions") -> List[str]:
-    """获取所有预测窗口目录"""
+    """
+    获取所有预测窗口目录
+    
+    支持两种目录结构：
+    1. 干净数据: {base_dir}/{dataset}_clean_{term}_prediction/
+    2. 填补数据: {base_dir}/{eval_data_name}_prediction/{imputation_method}/
+    
+    Returns:
+        预测窗口目录路径列表
+    """
     pred_base = Path(base_dir)
     if not pred_base.exists():
         return []
@@ -35,7 +45,12 @@ def get_all_prediction_dirs(base_dir: str = "datasets/Intermediate_Predictions")
     dirs = []
     for item in pred_base.iterdir():
         if item.is_dir() and item.name.endswith("_prediction"):
-            dirs.append(str(item))
+            subdirs = [d for d in item.iterdir() if d.is_dir() and is_imputation_method_dir(d.name)]
+            if subdirs:
+                for subdir in subdirs:
+                    dirs.append(str(subdir))
+            else:
+                dirs.append(str(item))
     
     return sorted(dirs)
 
@@ -44,14 +59,26 @@ def get_datasets_with_predictions(base_dir: str = "datasets/Intermediate_Predict
     """
     获取有预测窗口的数据集信息
     
+    支持两种目录结构：
+    1. 干净数据: {base_dir}/{dataset}_clean_{term}_prediction/
+    2. 填补数据: {base_dir}/{eval_data_name}_prediction/{imputation_method}/
+    
     Returns:
-        {dataset: [{method, block_length, ratio, term, dir_path}, ...]}
+        {dataset: [{method, block_length, ratio, term, imputation_method, dir_path}, ...]}
     """
     pred_dirs = get_all_prediction_dirs(base_dir)
     
     datasets = defaultdict(list)
     for dir_path in pred_dirs:
-        dir_name = Path(dir_path).name
+        path = Path(dir_path)
+        imputation_method = None
+        
+        if is_imputation_method_dir(path.name):
+            imputation_method = path.name.lower()
+            dir_name = path.parent.name
+        else:
+            dir_name = path.name
+        
         info = parse_prediction_dirname(dir_name)
         if info:
             datasets[info['dataset']].append({
@@ -59,6 +86,7 @@ def get_datasets_with_predictions(base_dir: str = "datasets/Intermediate_Predict
                 'block_length': info['block_length'],
                 'ratio': info['ratio'],
                 'term': info['term'],
+                'imputation_method': imputation_method,
                 'dir_path': dir_path,
             })
     
@@ -85,9 +113,10 @@ def run_batch_analysis(
     analyze_predictions: bool = True,
     analyze_clean_history: bool = True,
     analyze_imputed_history: bool = True,
-    datasets: List[str] = None,
-    terms: List[str] = None,
-    impute_methods: List[str] = None,
+    datasets: Optional[List[str]] = None,
+    terms: Optional[List[str]] = None,
+    impute_methods: Optional[List[str]] = None,
+    overwrite: bool = False,
 ):
     """
     批量分析窗口特征
@@ -128,7 +157,15 @@ def run_batch_analysis(
         print(f"  找到 {len(pred_dirs)} 个预测窗口目录")
         
         for pred_dir in pred_dirs:
-            dir_name = Path(pred_dir).name
+            path = Path(pred_dir)
+            imputation_method = None
+            
+            if is_imputation_method_dir(path.name):
+                imputation_method = path.name.lower()
+                dir_name = path.parent.name
+            else:
+                dir_name = path.name
+            
             info = parse_prediction_dirname(dir_name)
             
             if not info:
@@ -139,21 +176,32 @@ def run_batch_analysis(
                 continue
             if terms and info['term'] not in terms:
                 continue
+            if impute_methods and imputation_method and imputation_method not in impute_methods:
+                continue
             
-            print(f"\n  处理: {dir_name}")
+            display_name = f"{dir_name}/{imputation_method}" if imputation_method else dir_name
+            print(f"\n  处理: {display_name}")
             
+            if imputation_method:
+                key = f"{info['dataset']}_{info['method']}_{info['ratio']}_{info['term']}_{imputation_method}"
+            else:
+                key = f"{info['dataset']}_{info['method']}_{info['ratio']}_{info['term']}"
+            json_output = output_path / "predictions" / f"{key}.json"
+            if json_output.exists() and not overwrite:
+                print(f"    [跳过] 结果已存在: {json_output}")
+                try:
+                    with open(json_output, 'r', encoding='utf-8') as f:
+                        all_results["predictions"][key] = json.load(f)
+                except Exception as e:
+                    print(f"      [警告] 读取已有结果失败: {e}")
+                continue
             try:
                 result = analyze_prediction_windows(pred_dir)
-                
                 if result.get("success"):
-                    key = f"{info['dataset']}_{info['method']}_{info['ratio']}_{info['term']}"
                     all_results["predictions"][key] = result
-                    
-                    json_output = output_path / "predictions" / f"{key}.json"
                     save_results(result, str(json_output))
                 else:
                     print(f"    [失败] {result.get('error', 'Unknown error')}")
-                    
             except Exception as e:
                 print(f"    [错误] {e}")
                 continue
@@ -176,21 +224,26 @@ def run_batch_analysis(
             for term in available_terms:
                 print(f"\n  处理: {dataset} - {term}")
                 
+                key = f"{dataset}_{term}"
+                json_output = output_path / "clean_history" / f"{key}.json"
+                if json_output.exists() and not overwrite:
+                    print(f"    [跳过] 结果已存在: {json_output}")
+                    try:
+                        with open(json_output, 'r', encoding='utf-8') as f:
+                            all_results["clean_history"][key] = json.load(f)
+                    except Exception as e:
+                        print(f"      [警告] 读取已有结果失败: {e}")
+                    continue
                 try:
                     result = analyze_history_windows(
                         dataset_name=dataset,
                         term=term,
                     )
-                    
                     if result.get("success"):
-                        key = f"{dataset}_{term}"
                         all_results["clean_history"][key] = result
-                        
-                        json_output = output_path / "clean_history" / f"{key}.json"
                         save_results(result, str(json_output))
                     else:
                         print(f"    [失败] {result.get('error', 'Unknown error')}")
-                        
                 except Exception as e:
                     print(f"    [错误] {e}")
                     continue
@@ -208,6 +261,9 @@ def run_batch_analysis(
         for dataset, infos in pred_info.items():
             method_ratio_terms = defaultdict(set)
             for info in infos:
+                # clean 预测窗口没有缺失注入配置，跳过填补历史分析
+                if info['method'] == 'clean' or info['ratio'] is None:
+                    continue
                 key = (info['method'], info['ratio'], info['term'])
                 method_ratio_terms[key].add(info['term'])
             
@@ -228,6 +284,16 @@ def run_batch_analysis(
                 for impute_method in available_impute_methods:
                     print(f"\n  处理: {dataset} - {method} - {ratio} - {term} - {impute_method}")
                     
+                    key = f"{dataset}_{method}_{ratio}_{term}_{impute_method}"
+                    json_output = output_path / "imputed_history" / f"{key}.json"
+                    if json_output.exists() and not overwrite:
+                        print(f"    [跳过] 结果已存在: {json_output}")
+                        try:
+                            with open(json_output, 'r', encoding='utf-8') as f:
+                                all_results["imputed_history"][key] = json.load(f)
+                        except Exception as e:
+                            print(f"      [警告] 读取已有结果失败: {e}")
+                        continue
                     try:
                         result = analyze_imputed_history_windows(
                             dataset_name=dataset,
@@ -236,16 +302,11 @@ def run_batch_analysis(
                             term=term,
                             impute_method=impute_method,
                         )
-                        
                         if result.get("success"):
-                            key = f"{dataset}_{method}_{ratio}_{term}_{impute_method}"
                             all_results["imputed_history"][key] = result
-                            
-                            json_output = output_path / "imputed_history" / f"{key}.json"
                             save_results(result, str(json_output))
                         else:
                             print(f"    [失败] {result.get('error', 'Unknown error')}")
-                            
                     except Exception as e:
                         print(f"    [错误] {e}")
                         continue
@@ -317,6 +378,11 @@ if __name__ == "__main__":
         action="store_true",
         help="跳过填补数据历史窗口分析",
     )
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="覆盖已有结果 (默认跳过已存在的 JSON)",
+    )
     
     args = parser.parse_args()
     
@@ -340,4 +406,5 @@ if __name__ == "__main__":
         datasets=datasets,
         terms=terms,
         impute_methods=impute_methods,
+        overwrite=args.overwrite,
     )

@@ -1,0 +1,358 @@
+{
+  "success": true,
+  "dataset": "electricity",
+  "method": "BM",
+  "ratio": 0.3,
+  "term": "short",
+  "impute_method": "forward",
+  "inject_range": {
+    "dataset_name": "electricity",
+    "term": "short",
+    "frequency": "H",
+    "prediction_length": 48,
+    "windows": 20,
+    "max_context": 2880,
+    "start_index": 22464,
+    "end_index": 26256,
+    "injection_length": 3792,
+    "total_length": 26304
+  },
+  "period": 24,
+  "n_windows": 20,
+  "summary": {
+    "mean": {
+      "trend_strength": 0.6907310612230092,
+      "trend_linearity": -0.23148188659919264,
+      "seasonal_strength": 0.6575667995291166,
+      "seasonal_correlation": 0.795109274275352,
+      "residual_autocorr_lag1": 0.7484350086609617,
+      "spectral_entropy": 24731.317233855083
+    },
+    "std": {
+      "trend_strength": 0.01733097654920013,
+      "trend_linearity": 0.018367478781056365,
+      "seasonal_strength": 0.04885327429954163,
+      "seasonal_correlation": 0.09069236697945246,
+      "residual_autocorr_lag1": 0.020384899878523526,
+      "spectral_entropy": 67.81326095697466
+    },
+    "min": {
+      "trend_strength": 0.6489958844724171,
+      "trend_linearity": -0.25785748146758186,
+      "seasonal_strength": 0.560270686837159,
+      "seasonal_correlation": 0.6272384736443399,
+      "residual_autocorr_lag1": 0.7011672663570202,
+      "spectral_entropy": 24564.90615535894
+    },
+    "max": {
+      "trend_strength": 0.7192193561639469,
+      "trend_linearity": -0.18933442140930304,
+      "seasonal_strength": 0.7294751936812877,
+      "seasonal_correlation": 0.9177193799552342,
+      "residual_autocorr_lag1": 0.7837133198316193,
+      "spectral_entropy": 24817.963750128598
+    }
+  },
+  "window_results": [
+    {
+      "window_idx": 0,
+      "history_start": 23376,
+      "history_end": 26256,
+      "history_length": 2880,
+      "metrics": {
+        "trend_strength": 0.6613148494023163,
+        "trend_linearity": -0.1994207294112027,
+        "seasonal_strength": 0.5695271380610447,
+        "seasonal_correlation": 0.6494907461641581,
+        "residual_autocorr_lag1": 0.7441815954451443,
+        "spectral_entropy": 24564.90615535894
+      },
+      "n_series": 1
+    },
+    {
+      "window_idx": 1,
+      "history_start": 23328,
+      "history_end": 26208,
+      "history_length": 2880,
+      "metrics": {
+        "trend_strength": 0.6489958844724171,
+        "trend_linearity": -0.18933442140930304,
+        "seasonal_strength": 0.560270686837159,
+        "seasonal_correlation": 0.6272384736443399,
+        "residual_autocorr_lag1": 0.7011672663570202,
+        "spectral_entropy": 24666.685287695876
+      },
+      "n_series": 1
+    },
+    {
+      "window_idx": 2,
+      "history_start": 23280,
+      "history_end": 26160,
+      "history_length": 2880,
+      "metrics": {
+        "trend_strength": 0.6713713893821738,
+        "trend_linearity": -0.20979175854092563,
+        "seasonal_strength": 0.591735936148978,
+        "seasonal_correlation": 0.63757733069751,
+        "residual_autocorr_lag1": 0.7213468779593527,
+        "spectral_entropy": 24674.891257994655
+      },
+      "n_series": 1
+    },
+    {
+      "window_idx": 3,
+      "history_start": 23232,
+      "history_end": 26112,
+      "history_length": 2880,
+      "metrics": {
+        "trend_strength": 0.6826914038320457,
+        "trend_linearity": -0.2301000638224604,
+        "seasonal_strength": 0.6043270327780561,
+        "seasonal_correlation": 0.7345527386236352,
+        "residual_autocorr_lag1": 0.739081875215779,
+        "spectral_entropy": 24664.056891208034
+      },
+      "n_series": 1
+    },
+    {
+      "window_idx": 4,
+      "history_start": 23184,
+      "history_end": 26064,
+      "history_length": 2880,
+      "metrics": {
+        "trend_strength": 0.6910836716745424,
+        "trend_linearity": -0.22618939144229377,
+        "seasonal_strength": 0.6250695255547083,
+        "seasonal_correlation": 0.6979881559820956,
+        "residual_autocorr_lag1": 0.7326627238762052,
+        "spectral_entropy": 24701.89659317705
+      },
+      "n_series": 1
+    },
+    {
+      "window_idx": 5,
+      "history_start": 23136,
+      "history_end": 26016,
+      "history_length": 2880,
+      "metrics": {
+        "trend_strength": 0.6880494763144178,
+        "trend_linearity": -0.2440563898375763,
+        "seasonal_strength": 0.6255903432245494,
+        "seasonal_correlation": 0.749464748922298,
+        "residual_autocorr_lag1": 0.7313088163554792,
+        "spectral_entropy": 24644.382184097034
+      },
+      "n_series": 1
+    },
+    {
+      "window_idx": 6,
+      "history_start": 23088,
+      "history_end": 25968,
+      "history_length": 2880,
+      "metrics": {
+        "trend_strength": 0.6955705239191453,
+        "trend_linearity": -0.25785748146758186,
+        "seasonal_strength": 0.6390457346312135,
+        "seasonal_correlation": 0.7428473844241846,
+        "residual_autocorr_lag1": 0.7207537724383429,
+        "spectral_entropy": 24714.461345563737
+      },
+      "n_series": 1
+    },
+    {
+      "window_idx": 7,
+      "history_start": 23040,
+      "history_end": 25920,
+      "history_length": 2880,
+      "metrics": {
+        "trend_strength": 0.697566004747133,
+        "trend_linearity": -0.25518805495320784,
+        "seasonal_strength": 0.656550167414844,
+        "seasonal_correlation": 0.7754177598891488,
+        "residual_autocorr_lag1": 0.7338955912416382,
+        "spectral_entropy": 24671.564052258924
+      },
+      "n_series": 1
+    },
+    {
+      "window_idx": 8,
+      "history_start": 22992,
+      "history_end": 25872,
+      "history_length": 2880,
+      "metrics": {
+        "trend_strength": 0.6913197623627407,
+        "trend_linearity": -0.24218013297773489,
+        "seasonal_strength": 0.6638749448764214,
+        "seasonal_correlation": 0.794728064924088,
+        "residual_autocorr_lag1": 0.7429445447216813,
+        "spectral_entropy": 24713.100436109646
+      },
+      "n_series": 1
+    },
+    {
+      "window_idx": 9,
+      "history_start": 22944,
+      "history_end": 25824,
+      "history_length": 2880,
+      "metrics": {
+        "trend_strength": 0.6880536370212669,
+        "trend_linearity": -0.23785132644730778,
+        "seasonal_strength": 0.6698644003471665,
+        "seasonal_correlation": 0.8059822707993791,
+        "residual_autocorr_lag1": 0.7603958464685584,
+        "spectral_entropy": 24713.08705498594
+      },
+      "n_series": 1
+    },
+    {
+      "window_idx": 10,
+      "history_start": 22896,
+      "history_end": 25776,
+      "history_length": 2880,
+      "metrics": {
+        "trend_strength": 0.6791154933261354,
+        "trend_linearity": -0.223236360485476,
+        "seasonal_strength": 0.657674244580625,
+        "seasonal_correlation": 0.7700279510646483,
+        "residual_autocorr_lag1": 0.7446682393998159,
+        "spectral_entropy": 24747.912586187245
+      },
+      "n_series": 1
+    },
+    {
+      "window_idx": 11,
+      "history_start": 22848,
+      "history_end": 25728,
+      "history_length": 2880,
+      "metrics": {
+        "trend_strength": 0.6824215031492065,
+        "trend_linearity": -0.21952237428397475,
+        "seasonal_strength": 0.6610844996462749,
+        "seasonal_correlation": 0.8249807184356921,
+        "residual_autocorr_lag1": 0.7668544911772304,
+        "spectral_entropy": 24751.000712804802
+      },
+      "n_series": 1
+    },
+    {
+      "window_idx": 12,
+      "history_start": 22800,
+      "history_end": 25680,
+      "history_length": 2880,
+      "metrics": {
+        "trend_strength": 0.6829438370352103,
+        "trend_linearity": -0.24606242660461142,
+        "seasonal_strength": 0.6533838776600077,
+        "seasonal_correlation": 0.8676245056414711,
+        "residual_autocorr_lag1": 0.7837133198316193,
+        "spectral_entropy": 24803.087675990464
+      },
+      "n_series": 1
+    },
+    {
+      "window_idx": 13,
+      "history_start": 22752,
+      "history_end": 25632,
+      "history_length": 2880,
+      "metrics": {
+        "trend_strength": 0.7192193561639469,
+        "trend_linearity": -0.2571159513054197,
+        "seasonal_strength": 0.6919949272374887,
+        "seasonal_correlation": 0.8672789131172959,
+        "residual_autocorr_lag1": 0.7677280100079993,
+        "spectral_entropy": 24778.440622713537
+      },
+      "n_series": 1
+    },
+    {
+      "window_idx": 14,
+      "history_start": 22704,
+      "history_end": 25584,
+      "history_length": 2880,
+      "metrics": {
+        "trend_strength": 0.7164225559103901,
+        "trend_linearity": -0.2525501362921216,
+        "seasonal_strength": 0.7003560706329078,
+        "seasonal_correlation": 0.8555028552580618,
+        "residual_autocorr_lag1": 0.7692134496068823,
+        "spectral_entropy": 24792.23560388662
+      },
+      "n_series": 1
+    },
+    {
+      "window_idx": 15,
+      "history_start": 22656,
+      "history_end": 25536,
+      "history_length": 2880,
+      "metrics": {
+        "trend_strength": 0.7085843528704983,
+        "trend_linearity": -0.225412790575332,
+        "seasonal_strength": 0.7067096008806356,
+        "seasonal_correlation": 0.8814983744150402,
+        "residual_autocorr_lag1": 0.7662341446483353,
+        "spectral_entropy": 24811.575039076473
+      },
+      "n_series": 1
+    },
+    {
+      "window_idx": 16,
+      "history_start": 22608,
+      "history_end": 25488,
+      "history_length": 2880,
+      "metrics": {
+        "trend_strength": 0.6956793164015772,
+        "trend_linearity": -0.21520075440053432,
+        "seasonal_strength": 0.7067940232303753,
+        "seasonal_correlation": 0.8967912999738489,
+        "residual_autocorr_lag1": 0.7678983681173802,
+        "spectral_entropy": 24817.963750128598
+      },
+      "n_series": 1
+    },
+    {
+      "window_idx": 17,
+      "history_start": 22560,
+      "history_end": 25440,
+      "history_length": 2880,
+      "metrics": {
+        "trend_strength": 0.7121018985311784,
+        "trend_linearity": -0.2366608246011197,
+        "seasonal_strength": 0.7270423662838197,
+        "seasonal_correlation": 0.9137218429614491,
+        "residual_autocorr_lag1": 0.7554240384576573,
+        "spectral_entropy": 24790.324416400177
+      },
+      "n_series": 1
+    },
+    {
+      "window_idx": 18,
+      "history_start": 22512,
+      "history_end": 25392,
+      "history_length": 2880,
+      "metrics": {
+        "trend_strength": 0.6931135420014294,
+        "trend_linearity": -0.22796105231512445,
+        "seasonal_strength": 0.710965276874767,
+        "seasonal_correlation": 0.8917519706134645,
+        "residual_autocorr_lag1": 0.7682156807689948,
+        "spectral_entropy": 24811.74032807577
+      },
+      "n_series": 1
+    },
+    {
+      "window_idx": 19,
+      "history_start": 22464,
+      "history_end": 25344,
+      "history_length": 2880,
+      "metrics": {
+        "trend_strength": 0.7090027659424127,
+        "trend_linearity": -0.2339453108105448,
+        "seasonal_strength": 0.7294751936812877,
+        "seasonal_correlation": 0.9177193799552342,
+        "residual_autocorr_lag1": 0.7510115211241141,
+        "spectral_entropy": 24793.032683388163
+      },
+      "n_series": 1
+    }
+  ]
+}

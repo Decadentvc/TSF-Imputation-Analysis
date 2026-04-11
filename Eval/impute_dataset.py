@@ -4,7 +4,8 @@
 import argparse
 import sys
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
+import re
 
 import pandas as pd
 
@@ -20,6 +21,8 @@ from Imputation.imputation_methods import (
     seasonal_decomposition_imputation,
     none_imputation,
 )
+
+ALLOWED_METHODS = {"BM", "MCAR", "TM", "TVMR"}
 
 IMPUTATION_METHODS = {
     'zero': zero_imputation,
@@ -52,44 +55,75 @@ def get_imputation_method(method_name: str):
     return IMPUTATION_METHODS[method_name]
 
 
+def _infer_metadata_from_eval_path(eval_path: Path) -> Tuple[str, str, str, str]:
+    """根据评估文件路径推断 dataset/method/ratio/term。"""
+
+    stem = eval_path.stem
+    parts = stem.split('_')
+
+    term = parts[-1] if parts else "short"
+    method = None
+    ratio = None
+    dataset_tokens: List[str] = []
+
+    def is_ratio_token(token: str) -> bool:
+        return bool(re.fullmatch(r"\d{2,3}", token))
+
+    remaining = parts[:-1]
+    for token in remaining:
+        upper = token.upper()
+        if method is None and upper in ALLOWED_METHODS:
+            method = upper
+            continue
+        if ratio is None and is_ratio_token(token):
+            ratio = token.zfill(3)
+            continue
+        if token.lower().startswith('length'):
+            continue
+        dataset_tokens.append(token)
+
+    dataset_name = '_'.join(dataset_tokens) if dataset_tokens else stem
+
+    if method is None:
+        parents = list(eval_path.parents)
+        for i, parent in enumerate(parents):
+            parent_upper = parent.name.upper()
+            if parent_upper in ALLOWED_METHODS:
+                method = parent_upper
+                if ratio is None and i > 0:
+                    match = re.search(r"(\d{3})", parents[i - 1].name)
+                    if match:
+                        ratio = match.group(1)
+                break
+    if method is None:
+        method = "BM"
+
+    if ratio is None:
+        for parent in eval_path.parents:
+            match = re.search(r"(\d{3})", parent.name)
+            if match:
+                ratio = match.group(1)
+                break
+    if ratio is None:
+        ratio = "000"
+
+    return dataset_name, method, ratio, term
+
+
 def generate_imputed_dataset_path(
     eval_data_path: str,
     imputation_method: str,
     base_output_dir: str = "datasets/Imputed",
 ) -> str:
-    """
-    生成填补后数据集的保存路径
-    
-    Args:
-        eval_data_path: 原评估数据集路径
-        imputation_method: 填补方法名称
-        base_output_dir: 输出基础目录
-    
-    Returns:
-        填补后数据集的保存路径
-    """
+    """统一生成填补结果输出路径，确保目录结构一致。"""
+
     eval_path = Path(eval_data_path)
-    original_filename = eval_path.name
-    
-    parts = original_filename.replace('.csv', '').split('_')
-    
-    if len(parts) >= 4:
-        dataset_name = parts[0]
-        method = parts[1]
-        ratio = parts[-2]
-        term = parts[-1]
-        
-        output_filename = f"{dataset_name}_{method}_{ratio}_{term}_{imputation_method}.csv"
-        
-        output_dir = Path(base_output_dir) / method / f"{method}_{ratio}"
-        output_dir.mkdir(parents=True, exist_ok=True)
-        
-        return str(output_dir / output_filename)
-    else:
-        output_filename = f"{original_filename.replace('.csv', '')}_{imputation_method}.csv"
-        output_dir = Path(base_output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
-        return str(output_dir / output_filename)
+    dataset_name, method, ratio, term = _infer_metadata_from_eval_path(eval_path)
+
+    output_filename = f"{dataset_name}_{method}_{ratio}_{term}_{imputation_method}.csv"
+    output_dir = Path(base_output_dir) / method / f"{method}_{ratio}"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return str(output_dir / output_filename)
 
 
 def impute_dataset(
