@@ -13,19 +13,15 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from pathlib import Path
 from typing import Dict, List
 
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-FOR_SUNDIAL_DIR = PROJECT_ROOT / "Missing_Value_Injection" / "for_sundial"
-
-sys.path.insert(0, str(FOR_SUNDIAL_DIR))
-
-from inject_range_utils import get_injection_range  # type: ignore  # noqa: E402
-from MCAR import get_available_terms  # type: ignore  # noqa: E402
-from BM import inject_bm  # type: ignore  # noqa: E402
+try:
+    from .inject_range_utils import get_injection_range
+    from .BM import get_available_terms, inject_bm
+except ImportError:
+    from inject_range_utils import get_injection_range  # type: ignore  # noqa: E402
+    from BM import get_available_terms, inject_bm  # type: ignore  # noqa: E402
 
 
 def parse_missing_ratios(ratio_str: str) -> List[float]:
@@ -81,14 +77,14 @@ def main() -> None:
     parser.add_argument(
         "--data_path",
         type=str,
-        default="datasets",
-        help="数据集根目录（默认：datasets）",
+        default="data/datasets",
+        help="数据集根目录（默认：data/datasets）",
     )
     parser.add_argument(
         "--output_dir",
         type=str,
-        default="datasets",
-        help="输出根目录，结果会存到 <output_dir>/BM/BM_xxx 下（默认：datasets）",
+        default="data/datasets",
+        help="输出根目录，结果会存到 <output_dir>/BM/BM_xxx 下（默认：data/datasets）",
     )
     parser.add_argument(
         "--missing_ratios",
@@ -108,13 +104,23 @@ def main() -> None:
         default=42,
         help="随机种子（默认：42）",
     )
+    parser.add_argument(
+        "--max_context",
+        type=int,
+        default=8192,
+        help="最大回顾窗口长度（默认：8192）",
+    )
 
     args = parser.parse_args()
+
+    if args.data_path == "datasets":
+        args.data_path = str(Path(__file__).resolve().parents[2] / "data" / "datasets")
 
     data_path = Path(args.data_path).resolve()
     output_dir = Path(args.output_dir).resolve()
     missing_ratios = parse_missing_ratios(args.missing_ratios)
     block_length = args.block_length
+    max_context = args.max_context
     seed = args.seed
 
     print("========================================")
@@ -123,6 +129,7 @@ def main() -> None:
     print(f"输出目录: {output_dir / 'BM'}")
     print(f"缺失比例: {missing_ratios}")
     print(f"块长度: {block_length}")
+    print(f"max_context: {max_context}")
     print("========================================")
 
     dataset_props = load_dataset_properties(data_path)
@@ -144,7 +151,12 @@ def main() -> None:
         print(f"\n---- 数据集：{dataset_name} | terms={terms} ----")
         for term in terms:
             print(f"处理 term: {term}")
-            injection_range = get_injection_range(dataset_name, term, str(data_path))
+            injection_range = get_injection_range(
+                dataset_name=dataset_name,
+                term=term,
+                data_path=str(data_path),
+                max_context=max_context,
+            )
             injection_range["data_path"] = str(data_path)
 
             for ratio in missing_ratios:
