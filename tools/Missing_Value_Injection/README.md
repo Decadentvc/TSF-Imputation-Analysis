@@ -1,14 +1,17 @@
 # Missing Value Injection（BM-only）
 
-当前目录仅保留 **BM（Block Missing，块缺失）** 注入能力。
+当前目录提供 BM（Block Missing）注空能力，支持两种模式：
+
+- `stratified`：分层注空（默认），会参考多个 `max_context` 区间尽量平衡缺失率。
+- `random`：全随机注空（保留旧行为）。
 
 ## 目录说明
 
 ```text
 tools/Missing_Value_Injection/
-├── BM.py                  # 单数据集/单命令入口（支持自动 term、多缺失率）
-├── batch_bm_injection.py  # 批量遍历 datasets/ori 的全部数据集
-├── inject_range_utils.py  # 注错区间计算工具
+├── BM.py
+├── batch_bm_injection.py
+├── inject_range_utils.py
 └── README.md
 ```
 
@@ -20,9 +23,7 @@ conda activate TSFIA
 cd /home/decadent/TSF-Imputation-Analysis
 ```
 
----
-
-## 1) BM.py：常用注空入口
+## BM.py（单数据集入口）
 
 查看帮助：
 
@@ -30,74 +31,38 @@ cd /home/decadent/TSF-Imputation-Analysis
 python tools/Missing_Value_Injection/BM.py --help
 ```
 
-### 示例 A：单个缺失率，自动 term
+默认参数：
+
+- `--mode stratified`
+- `--balanced_contexts 512,2048,2880,4096,8192`
+- `--ratio_tolerance 0.1`
+- `--repair_steps 20`
+
+示例（默认 stratified）：
 
 ```bash
-python tools/Missing_Value_Injection/BM.py \
-  --dataset ETTh1 \
-  --missing_ratio 0.05
+python tools/Missing_Value_Injection/BM.py --dataset Finland_Traffic_15T --missing_ratio 0.1 --term long --no_auto_term
 ```
 
-> 默认 `--data_path` 与 `--output_dir` 已指向 `data/datasets`，一般无需手动填写。
-
-### 示例 B：多个缺失率
+示例（显式 random 模式）：
 
 ```bash
-python tools/Missing_Value_Injection/BM.py \
-  --dataset ETTh1 \
-  --missing_ratio "0.05,0.1,0.15" \
-  --block_length 50
+python tools/Missing_Value_Injection/BM.py --dataset Finland_Traffic_15T --missing_ratio 0.1 --term long --no_auto_term --mode random
 ```
 
-### 示例 C：只跑指定 term（关闭自动 term）
+示例（自定义平衡参数）：
 
 ```bash
-python tools/Missing_Value_Injection/BM.py \
-  --dataset ETTh1 \
-  --missing_ratio 0.1 \
-  --term short \
-  --no_auto_term
+python tools/Missing_Value_Injection/BM.py --dataset Finland_Traffic_15T --missing_ratio 0.1 --term long --no_auto_term --mode stratified --balanced_contexts 512,2048,2880,4096,8192 --ratio_tolerance 0.1 --repair_steps 20
 ```
 
-### 示例 D：修改 max_context（默认 8192）
-
-```bash
-python tools/Missing_Value_Injection/BM.py \
-  --dataset exchange_rate \
-  --missing_ratio 0.1 \
-  --max_context 4096
-```
-
-### 示例 E：显式指定数据目录
-
-```bash
-python tools/Missing_Value_Injection/BM.py \
-  --dataset Finland_Traffic_15T \
-  --missing_ratio 0.1 \
-  --term short \
-  --no_auto_term \
-  --data_path data/datasets
-```
-
-### 输出路径
-
-输出文件格式：
+输出路径：
 
 ```text
-{output_dir}/BM/BM_{ratio}/{dataset}_BM_length{block_length}_{ratio}_{term}.csv
+data/datasets/BM/BM_{ratio}/{dataset}_BM_length{block_length}_{ratio}_{term}.csv
 ```
 
-例如：
-
-```text
-data/datasets/BM/BM_010/ETTh1_BM_length50_010_short.csv
-```
-
----
-
-## 2) batch_bm_injection.py：批量全数据集注空
-
-该脚本会遍历 `datasets/ori/*.csv`，并依据 `dataset_properties.json` 的 term 配置执行注空。
+## batch_bm_injection.py（批量入口）
 
 查看帮助：
 
@@ -105,48 +70,40 @@ data/datasets/BM/BM_010/ETTh1_BM_length50_010_short.csv
 python tools/Missing_Value_Injection/batch_bm_injection.py --help
 ```
 
-### 示例 A：默认配置批量执行
+示例（默认 stratified 批量）：
 
 ```bash
-python tools/Missing_Value_Injection/batch_bm_injection.py
+python tools/Missing_Value_Injection/batch_bm_injection.py --missing_ratios 0.1,0.2 --block_length 50 --mode stratified
 ```
 
-### 示例 B：自定义缺失率、块长度、max_context
+## 区间缺失率报告脚本
 
-```bash
-python tools/Missing_Value_Injection/batch_bm_injection.py \
-  --missing_ratios "0.05,0.1" \
-  --block_length 100 \
-  --max_context 8192 \
-  --seed 123
-```
-
----
-
-## 3) inject_range_utils.py：单独查看注错区间
+新增脚本：`tools/context_missing_ratio_report.py`，用于按多个 `max_context` 计算同一文件的区间缺失率。
 
 查看帮助：
 
 ```bash
-python tools/Missing_Value_Injection/inject_range_utils.py --help
+python tools/context_missing_ratio_report.py --help
 ```
 
 示例：
 
 ```bash
-python tools/Missing_Value_Injection/inject_range_utils.py \
-  --dataset ETTh1 \
-  --term long \
-  --max_context 8192
+python tools/context_missing_ratio_report.py --dataset Finland_Traffic_15T --term long --ratio 010 --block_length 50 --contexts 512,2048,2880,4096,8192
 ```
 
----
+输出列：
 
-## 参数补充
+- `max_context`
+- `start_index`
+- `end_index`
+- `injection_length`
+- `missing_cells`
+- `total_cells`
+- `missing_ratio`
 
-- `missing_ratio` / `missing_ratios` 支持：
-  - `0.05`
-  - `0.05,0.1,0.15`
-  - `[0.05,0.1,0.15]`
-- `max_context` 默认值为 `8192`。
-- BM 注入只作用于非时间列与非标识列（`date/time/timestamp/item_id` 会跳过）。
+## 说明
+
+- 注空时会跳过 `date/time/timestamp/item_id` 列。
+- 所有缺失块均为固定长度 `block_length`，不使用补偿块。
+- stratified 模式保留随机放置，避免规则化的机械分布。

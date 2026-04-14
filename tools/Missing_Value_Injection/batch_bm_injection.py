@@ -18,10 +18,10 @@ from typing import Dict, List
 
 try:
     from .inject_range_utils import get_injection_range
-    from .BM import get_available_terms, inject_bm
+    from .BM import get_available_terms, inject_bm, parse_int_list
 except ImportError:
     from inject_range_utils import get_injection_range  # type: ignore  # noqa: E402
-    from BM import get_available_terms, inject_bm  # type: ignore  # noqa: E402
+    from BM import get_available_terms, inject_bm, parse_int_list  # type: ignore  # noqa: E402
 
 
 def parse_missing_ratios(ratio_str: str) -> List[float]:
@@ -110,6 +110,31 @@ def main() -> None:
         default=8192,
         help="最大回顾窗口长度（默认：8192）",
     )
+    parser.add_argument(
+        "--mode",
+        type=str,
+        default="stratified",
+        choices=["stratified", "random"],
+        help="注空模式（默认：stratified）",
+    )
+    parser.add_argument(
+        "--balanced_contexts",
+        type=str,
+        default="512,2048,2880,4096,8192",
+        help="stratified 模式 context 列表（默认：512,2048,2880,4096,8192）",
+    )
+    parser.add_argument(
+        "--ratio_tolerance",
+        type=float,
+        default=0.1,
+        help="允许相对偏差（默认：0.1）",
+    )
+    parser.add_argument(
+        "--repair_steps",
+        type=int,
+        default=20,
+        help="修正迭代上限（默认：20）",
+    )
 
     args = parser.parse_args()
 
@@ -121,6 +146,10 @@ def main() -> None:
     missing_ratios = parse_missing_ratios(args.missing_ratios)
     block_length = args.block_length
     max_context = args.max_context
+    mode = args.mode
+    balanced_contexts = parse_int_list(args.balanced_contexts)
+    ratio_tolerance = args.ratio_tolerance
+    repair_steps = args.repair_steps
     seed = args.seed
 
     print("========================================")
@@ -130,6 +159,7 @@ def main() -> None:
     print(f"缺失比例: {missing_ratios}")
     print(f"块长度: {block_length}")
     print(f"max_context: {max_context}")
+    print(f"mode: {mode}")
     print("========================================")
 
     dataset_props = load_dataset_properties(data_path)
@@ -182,6 +212,10 @@ def main() -> None:
                     term=term,
                     block_length=block_length,
                     seed=seed,
+                    mode=mode,
+                    balanced_contexts=balanced_contexts,
+                    ratio_tolerance=ratio_tolerance,
+                    repair_steps=repair_steps,
                 )
                 df_injected.to_csv(output_path, index=False)
 

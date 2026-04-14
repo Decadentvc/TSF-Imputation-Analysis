@@ -1,13 +1,8 @@
-"""BM（块缺失）缺失值注入模块。
-
-包含两层能力：
-1) 底层 API: ``inject_bm``
-2) 命令行入口: 支持单/多缺失率、自动 term 检测、批量保存
-"""
+"""BM（块缺失）缺失值注入模块。"""
 
 import argparse
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -18,6 +13,191 @@ except ImportError:
     from inject_range_utils import get_injection_range, load_dataset_properties
 
 
+DEFAULT_BALANCED_CONTEXTS = [512, 2048, 2880, 4096, 8192]
+
+
+def parse_missing_ratios(ratio_str: str) -> List[float]:
+    ratio_str = ratio_str.strip().strip("[]")
+    ratios = [float(r.strip()) for r in ratio_str.split(",") if r.strip()]
+    if not ratios:
+        raise ValueError("missing_ratio list is empty")
+    for ratio in ratios:
+        if not 0 <= ratio <= 1:
+            raise ValueError(f"missing_ratio must be between 0 and 1, got {ratio}")
+    return ratios
+
+
+def parse_int_list(value: str) -> List[int]:
+    chunks = [c.strip() for c in value.strip().strip("[]").split(",") if c.strip()]
+    if not chunks:
+        raise ValueError("balanced_contexts list is empty")
+    contexts = [int(c) for c in chunks]
+    if any(c <= 0 for c in contexts):
+        raise ValueError("balanced_contexts must be positive integers")
+    return sorted(set(contexts))
+
+
+def _allocate_integer(total: int, weights: Sequence[float]) -> List[int]:
+    if total <= 0:
+        return [0 for _ in weights]
+    weight_sum = float(sum(weights))
+    if weight_sum <= 0:
+        out = [0 for _ in weights]
+        out[0] = total
+        return out
+    raw = [total * (w / weight_sum) for w in weights]
+    base = [int(np.floor(v)) for v in raw]
+    rem = total - sum(base)
+    if rem > 0:
+        order = sorted(range(len(raw)), key=lambda i: (raw[i] - base[i]), reverse=True)
+        for i in order[:rem]:
+            base[i] += 1
+    return base
+
+
+def _can_place(occupied: np.ndarray, start_rel: int, length: int, min_gap: int = 1) -> bool:
+    end_rel = start_rel + length
+    left = max(0, start_rel - min_gap)
+    right = min(len(occupied), end_rel + min_gap)
+    return not occupied[left:right].any()
+
+
+def _place_block_random(
+    occupied: np.ndarray,
+    global_start_idx: int,
+    layer_start: int,
+    layer_end: int,
+    block_length: int,
+    rng: np.random.Generator,
+    trials: int,
+) -> int | None:
+    max_start = layer_end - block_length
+    if max_start < layer_start:
+        return None
+
+    n_candidates = max_start - layer_start + 1
+    attempts = min(max(1, trials), n_candidates)
+    for _ in range(attempts):
+        start = int(rng.integers(layer_start, max_start + 1))
+        start_rel = start - global_start_idx
+        if _can_place(occupied, start_rel, block_length):
+            occupied[start_rel:start_rel + block_length] = True
+            return start
+
+    if n_candidates <= 10000:
+        starts = np.arange(layer_start, max_start + 1)
+        rng.shuffle(starts)
+        for start in starts.tolist():
+            start_rel = int(start) - global_start_idx
+            if _can_place(occupied, start_rel, block_length):
+                occupied[start_rel:start_rel + block_length] = True
+                return int(start)
+
+    return None
+
+
+def _build_stratified_ranges(
+    dataset_name: str,
+    term: str,
+    data_path: str,
+    start_idx: int,
+    end_idx: int,
+    balanced_contexts: Sequence[int],
+) -> List[Tuple[int, int]]:
+    starts: List[int] = []
+    for mc in sorted(set(balanced_contexts)):
+        r = get_injection_range(dataset_name=dataset_name, term=term, data_path=data_path, max_context=mc)
+        s = max(start_idx, int(r["start_index"]))
+        e = min(end_idx, int(r["end_index"]))
+        if s < e:
+            starts.append(s)
+
+    starts = sorted(set(starts), reverse=True)
+    if not starts:
+        return [(start_idx, end_idx)]
+
+    ranges: List[Tuple[int, int]] = []
+    prev = end_idx
+    for s in starts:
+        if s < prev:
+            ranges.append((s, prev))
+            prev = s
+    if start_idx < prev:
+        ranges.append((start_idx, prev))
+    return ranges
+
+
+def _context_stats(
+    df: pd.DataFrame,
+    data_cols: Sequence[str],
+    dataset_name: str,
+    term: str,
+    data_path: str,
+    start_idx: int,
+    end_idx: int,
+    balanced_contexts: Sequence[int],
+) -> List[dict]:
+    stats = []
+    for mc in sorted(set(balanced_contexts)):
+        r = get_injection_range(dataset_name=dataset_name, term=term, data_path=data_path, max_context=mc)
+        s = max(start_idx, int(r["start_index"]))
+        e = min(end_idx, int(r["end_index"]))
+        if s >= e:
+            continue
+        part = df.iloc[s:e][list(data_cols)]
+        total_cells = len(part) * len(data_cols)
+        missing_cells = int(part.isna().sum().sum())
+        ratio = (missing_cells / total_cells) if total_cells > 0 else 0.0
+        stats.append(
+            {
+                "max_context": mc,
+                "start_index": s,
+                "end_index": e,
+                "total_cells": total_cells,
+                "missing_cells": missing_cells,
+                "missing_ratio": ratio,
+            }
+        )
+    return stats
+
+
+def _inject_for_column(
+    df: pd.DataFrame,
+    col: str,
+    start_idx: int,
+    end_idx: int,
+    ranges: Sequence[Tuple[int, int]],
+    block_length: int,
+    n_blocks_target: int,
+    rng: np.random.Generator,
+    repair_steps: int,
+) -> List[dict]:
+    occupied = np.zeros(end_idx - start_idx, dtype=bool)
+    positions: List[dict] = []
+    range_lengths = [max(0, e - s) for s, e in ranges]
+    blocks_per_range = _allocate_integer(n_blocks_target, range_lengths)
+
+    for (r_start, r_end), target_blocks in zip(ranges, blocks_per_range):
+        placed_blocks = 0
+        while placed_blocks < target_blocks:
+            start = _place_block_random(
+                occupied=occupied,
+                global_start_idx=start_idx,
+                layer_start=r_start,
+                layer_end=r_end,
+                block_length=block_length,
+                rng=rng,
+                trials=max(32, repair_steps * 8),
+            )
+            if start is None:
+                break
+            end = start + block_length
+            df.loc[start:end - 1, col] = np.nan
+            positions.append({"column": col, "start": start, "end": end, "length": block_length})
+            placed_blocks += 1
+    return positions
+
+
 def inject_bm(
     dataset_name: str,
     injection_range: dict,
@@ -25,129 +205,98 @@ def inject_bm(
     term: str,
     block_length: int = 50,
     seed: int = 42,
+    mode: str = "stratified",
+    balanced_contexts: Sequence[int] = DEFAULT_BALANCED_CONTEXTS,
+    ratio_tolerance: float = 0.1,
+    repair_steps: int = 20,
 ) -> Tuple[pd.DataFrame, dict]:
-    """
-    在注错区间内按照块缺失模式注入缺失值
-    
-    Args:
-        dataset_name: 数据集名称
-        injection_range: 注错区间信息字典（来自 inject_range_utils.get_injection_range）
-            必须包含：start_index, end_index
-        missing_ratio: 缺失比例（0.0-1.0）
-        term: term 类型（"short", "medium", "long"）
-        block_length: 单个缺失块的长度（默认：50）
-        seed: 随机种子
-        
-    Returns:
-        Tuple[pd.DataFrame, dict]: 
-            - DataFrame: 注入缺失值后的数据集
-            - dict: 注入信息字典，包含：
-                - dataset_name: 数据集名称
-                - term: term 类型
-                - missing_ratio: 缺失比例
-                - block_length: 块长度
-                - n_blocks: 块数量
-                - total_cells: 注错区间总单元格数
-                - injected_missing: 注入的缺失值数量
-                - actual_missing_ratio: 实际缺失比例
-                - injection_range: 注错区间信息
-                - block_positions: 各块的位置信息
-    """
-    # 1. 读取原始数据
-    data_path = injection_range.get("data_path", "datasets")
+    data_path = injection_range.get("data_path", "data/datasets")
     csv_path = Path(data_path) / "ori" / f"{dataset_name}.csv"
     df = pd.read_csv(csv_path)
-    
-    # 2. 获取注错区间
-    start_idx = injection_range["start_index"]
-    end_idx = injection_range["end_index"]
+
+    start_idx = int(injection_range["start_index"])
+    end_idx = int(injection_range["end_index"])
     injection_length = end_idx - start_idx
-    
-    # 3. 识别不注空列（时间列 + item_id）和可注空列
-    excluded_cols = {'date', 'time', 'timestamp', 'item_id'}
+
+    excluded_cols = {"date", "time", "timestamp", "item_id"}
     data_cols = [col for col in df.columns if col.lower() not in excluded_cols]
-    
-    # 4. 计算块数量
-    # 总缺失数 = 数据集长度 × 缺失率 × 列数
-    # 块数 = 总缺失数 / 块长度，向下取整
-    total_missing = int(injection_length * len(data_cols) * missing_ratio)
-    n_blocks = total_missing // block_length
-    
-    # 5. 设置随机种子
-    seed_offset = hash(f"{dataset_name}_{term}_{missing_ratio}_BM") % 10000
-    np.random.seed(seed + seed_offset)
-    
-    # 6. 对每一列注入块缺失
-    block_positions = []
-    injected_count = 0
-    
-    for col in data_cols:
-        # 计算该列的块数量（按比例分配）
-        col_n_blocks = n_blocks // len(data_cols)
-        
-        if col_n_blocks == 0:
-            continue
-        
-        # 生成不重叠的块起始位置
-        block_starts = generate_non_overlapping_blocks(
+    if not data_cols:
+        raise ValueError("No data columns available for BM injection")
+
+    total_target_missing = int(round(injection_length * len(data_cols) * missing_ratio))
+    total_target_blocks = max(0, total_target_missing // block_length)
+    blocks_per_col = _allocate_integer(total_target_blocks, [1.0] * len(data_cols))
+
+    seed_offset = hash(f"{dataset_name}_{term}_{missing_ratio}_BM_{mode}") % 10000
+    rng = np.random.default_rng(seed + seed_offset)
+
+    if mode == "stratified":
+        ranges = _build_stratified_ranges(
+            dataset_name=dataset_name,
+            term=term,
+            data_path=data_path,
             start_idx=start_idx,
             end_idx=end_idx,
-            block_length=block_length,
-            n_blocks=col_n_blocks,
+            balanced_contexts=balanced_contexts,
         )
-        
-        # 注入缺失值
-        for block_start in block_starts:
-            block_end = min(block_start + block_length, end_idx)
-            df.loc[block_start:block_end-1, col] = np.nan
-            injected_count += (block_end - block_start)
-            
-            block_positions.append({
-                "column": col,
-                "start": block_start,
-                "end": block_end,
-                "length": block_end - block_start,
-            })
-    
-    # 7. 计算实际缺失比例
+    else:
+        ranges = [(start_idx, end_idx)]
+
+    block_positions: List[dict] = []
+    for col, n_blocks in zip(data_cols, blocks_per_col):
+        if n_blocks <= 0:
+            continue
+        positions = _inject_for_column(
+            df=df,
+            col=col,
+            start_idx=start_idx,
+            end_idx=end_idx,
+            ranges=ranges,
+            block_length=block_length,
+            n_blocks_target=n_blocks,
+            rng=rng,
+            repair_steps=repair_steps,
+        )
+        block_positions.extend(positions)
+
     injection_area_size = injection_length * len(data_cols)
-    actual_missing_ratio = injected_count / injection_area_size if injection_area_size > 0 else 0
-    
-    # 8. 构建返回信息
+    injected_count = int(df.iloc[start_idx:end_idx][data_cols].isna().sum().sum())
+    actual_missing_ratio = injected_count / injection_area_size if injection_area_size > 0 else 0.0
+
+    context_stats = _context_stats(
+        df=df,
+        data_cols=data_cols,
+        dataset_name=dataset_name,
+        term=term,
+        data_path=data_path,
+        start_idx=start_idx,
+        end_idx=end_idx,
+        balanced_contexts=balanced_contexts,
+    )
+    lower = missing_ratio * (1 - ratio_tolerance)
+    upper = missing_ratio * (1 + ratio_tolerance)
+    within_tolerance = all(lower <= s["missing_ratio"] <= upper for s in context_stats) if context_stats else True
+
     info = {
         "dataset_name": dataset_name,
         "term": term,
         "missing_ratio": missing_ratio,
         "block_length": block_length,
-        "n_blocks": n_blocks,
+        "mode": mode,
+        "n_blocks": len(block_positions),
         "total_cells": injection_area_size,
         "injected_missing": injected_count,
         "actual_missing_ratio": actual_missing_ratio,
-        "injection_range": {
-            "start_index": start_idx,
-            "end_index": end_idx,
-            "length": injection_length,
-        },
+        "injection_range": {"start_index": start_idx, "end_index": end_idx, "length": injection_length},
+        "balanced_contexts": list(sorted(set(balanced_contexts))),
+        "ratio_tolerance": ratio_tolerance,
+        "repair_steps": repair_steps,
+        "within_tolerance": within_tolerance,
+        "context_stats": context_stats,
         "block_positions": block_positions,
         "data_columns": data_cols,
     }
-    
     return df, info
-
-
-def parse_missing_ratios(ratio_str: str) -> List[float]:
-    """解析缺失比例字符串。"""
-    ratio_str = ratio_str.strip().strip("[]")
-    ratios = [float(r.strip()) for r in ratio_str.split(",") if r.strip()]
-
-    if not ratios:
-        raise ValueError("missing_ratio list is empty")
-
-    for ratio in ratios:
-        if not 0 <= ratio <= 1:
-            raise ValueError(f"missing_ratio must be between 0 and 1, got {ratio}")
-
-    return ratios
 
 
 def save_dataset(
@@ -158,15 +307,21 @@ def save_dataset(
     output_base_dir: str = "data/datasets",
     block_length: int = 50,
 ) -> str:
-    """保存 BM 注入后的数据集。"""
     ratio_str = f"{int(missing_ratio * 100):03d}"
     output_dir = Path(output_base_dir) / "BM" / f"BM_{ratio_str}"
     output_dir.mkdir(parents=True, exist_ok=True)
-
     output_filename = f"{dataset_name}_BM_length{block_length}_{ratio_str}_{term}.csv"
     output_path = output_dir / output_filename
     df.to_csv(output_path, index=False)
     return str(output_path)
+
+
+def get_available_terms(dataset_name: str, data_path: str = "data/datasets") -> List[str]:
+    props = load_dataset_properties(data_path)
+    if dataset_name not in props:
+        raise ValueError(f"Dataset '{dataset_name}' not found in properties")
+    ds_term = props[dataset_name].get("term", "med_long")
+    return ["short"] if ds_term == "short" else ["short", "medium", "long"]
 
 
 def run_bm_injection(
@@ -178,26 +333,24 @@ def run_bm_injection(
     block_length: int = 50,
     max_context: int = 8192,
     seed: int = 42,
+    mode: str = "stratified",
+    balanced_contexts: Sequence[int] = DEFAULT_BALANCED_CONTEXTS,
+    ratio_tolerance: float = 0.1,
+    repair_steps: int = 20,
 ) -> List[dict]:
-    """批量运行 BM（块缺失）注入。"""
     data_path = str(Path(data_path))
+    effective_max_context = max(max_context, max(balanced_contexts) if balanced_contexts else max_context)
     results = []
     for term in terms:
         print(f"\n获取数据集 '{dataset_name}' ({term}) 的注错区间...")
-        injection_range = get_injection_range(
-            dataset_name=dataset_name,
-            term=term,
-            data_path=data_path,
-            max_context=max_context,
-        )
+        injection_range = get_injection_range(dataset_name=dataset_name, term=term, data_path=data_path, max_context=effective_max_context)
         injection_range["data_path"] = data_path
-
         print(f"  注错区间：[{injection_range['start_index']}, {injection_range['end_index']})")
         print(f"  注错区间长度：{injection_range['end_index'] - injection_range['start_index']}")
 
         for missing_ratio in missing_ratios:
             print(f"\n{'=' * 80}")
-            print(f"注入：pattern=BM, term={term}, missing_ratio={missing_ratio:.2%}")
+            print(f"注入：pattern=BM, term={term}, missing_ratio={missing_ratio:.2%}, mode={mode}")
             print(f"  块长度：{block_length}")
             print(f"{'=' * 80}")
 
@@ -208,6 +361,10 @@ def run_bm_injection(
                 term=term,
                 block_length=block_length,
                 seed=seed,
+                mode=mode,
+                balanced_contexts=balanced_contexts,
+                ratio_tolerance=ratio_tolerance,
+                repair_steps=repair_steps,
             )
 
             output_path = save_dataset(
@@ -224,143 +381,41 @@ def run_bm_injection(
 
             print("\n注入结果:")
             print(f"  总单元格数：{info['total_cells']}")
-            print(f"  块长度：{info['block_length']}")
             print(f"  块数量：{info['n_blocks']}")
             print(f"  注入缺失值数：{info['injected_missing']}")
             print(f"  实际缺失比例：{info['actual_missing_ratio']:.2%}")
+            print(f"  五区间约束达标：{info['within_tolerance']}")
             print("\n文件保存:")
             print(f"  {output_path}")
             print("=" * 80)
-
             results.append(info)
-
     return results
-
-
-def generate_non_overlapping_blocks(
-    start_idx: int,
-    end_idx: int,
-    block_length: int,
-    n_blocks: int,
-    min_gap: int = 1,
-) -> List[int]:
-    """
-    生成不重叠、不相邻的块起始位置
-    
-    Args:
-        start_idx: 起始索引
-        end_idx: 结束索引
-        block_length: 块长度
-        n_blocks: 块数量
-        min_gap: 块之间的最小间隔（默认：1，即不相邻）
-        
-    Returns:
-        块起始位置列表
-        
-    Raises:
-        ValueError: 如果无法在给定区间内放置指定数量的块
-    """
-    available_length = end_idx - start_idx
-    required_length = n_blocks * (block_length + min_gap) - min_gap
-    
-    if required_length > available_length:
-        raise ValueError(
-            f"Cannot place {n_blocks} blocks of length {block_length} "
-            f"in interval [{start_idx}, {end_idx}). "
-            f"Required length: {required_length}, available: {available_length}"
-        )
-    
-    # 使用贪心算法生成块位置
-    block_starts = []
-    current_pos = start_idx
-    
-    for i in range(n_blocks):
-        # 计算剩余可用空间
-        remaining_blocks = n_blocks - i
-        remaining_space = end_idx - current_pos - remaining_blocks * (block_length + min_gap) + min_gap
-        
-        # 随机选择下一个块的起始位置
-        if remaining_space > 0:
-            offset = np.random.randint(0, remaining_space + 1)
-            block_start = current_pos + offset
-        else:
-            block_start = current_pos
-        
-        block_starts.append(block_start)
-        
-        # 更新下一个块的起始位置（确保不重叠、不相邻）
-        current_pos = block_start + block_length + min_gap
-    
-    return block_starts
-
-
-def get_available_terms(dataset_name: str, data_path: str = "datasets") -> List[str]:
-    """
-    根据数据集配置获取可用的 term 列表
-    
-    Args:
-        dataset_name: 数据集名称
-        data_path: 数据集目录
-        
-    Returns:
-        term 列表，如 ["short"] 或 ["short", "medium", "long"]
-    """
-    props = load_dataset_properties(data_path)
-    if dataset_name not in props:
-        raise ValueError(f"Dataset '{dataset_name}' not found in properties")
-    
-    ds_term = props[dataset_name].get("term", "med_long")
-    
-    if ds_term == "short":
-        return ["short"]
-    else:  # med_long
-        return ["short", "medium", "long"]
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="BM（块缺失）缺失值注入")
     parser.add_argument("--dataset", type=str, required=True, help="数据集名称（如 ETTh1）")
-    parser.add_argument(
-        "--missing_ratio",
-        type=str,
-        required=True,
-        help="缺失比例，支持单个值或逗号分隔列表（如 0.05 或 0.05,0.1）",
-    )
-    parser.add_argument(
-        "--term",
-        type=str,
-        default=None,
-        choices=["short", "medium", "long"],
-        help="预测 horizon 类型（默认：自动根据数据集配置）",
-    )
+    parser.add_argument("--missing_ratio", type=str, required=True, help="缺失比例，支持单个值或逗号分隔列表")
+    parser.add_argument("--term", type=str, default=None, choices=["short", "medium", "long"], help="预测 horizon 类型")
     parser.add_argument("--data_path", type=str, default="data/datasets", help="数据集目录")
     parser.add_argument("--output_dir", type=str, default="data/datasets", help="输出目录")
-    parser.add_argument("--block_length", type=int, default=50, help="块长度（默认：50）")
-    parser.add_argument(
-        "--max_context",
-        type=int,
-        default=8192,
-        help="最大回顾窗口长度（默认：8192）",
-    )
-    parser.add_argument("--seed", type=int, default=42, help="随机种子（默认：42）")
-    parser.add_argument(
-        "--no_auto_term",
-        action="store_true",
-        help="禁用自动 term 检测，使用 --term 指定值",
-    )
-
+    parser.add_argument("--block_length", type=int, default=50, help="块长度")
+    parser.add_argument("--max_context", type=int, default=8192, help="最大回顾窗口长度")
+    parser.add_argument("--seed", type=int, default=42, help="随机种子")
+    parser.add_argument("--mode", type=str, default="stratified", choices=["stratified", "random"], help="注空模式")
+    parser.add_argument("--balanced_contexts", type=str, default="512,2048,2880,4096,8192", help="stratified 模式的 context 列表")
+    parser.add_argument("--ratio_tolerance", type=float, default=0.1, help="允许相对偏差（默认 0.1）")
+    parser.add_argument("--repair_steps", type=int, default=20, help="随机搜索尝试系数（默认 20）")
+    parser.add_argument("--no_auto_term", action="store_true", help="禁用自动 term 检测，使用 --term 指定值")
     args = parser.parse_args()
 
     if args.data_path == "datasets":
-        default_data_path = Path(__file__).resolve().parents[2] / "data" / "datasets"
-        args.data_path = str(default_data_path)
+        args.data_path = str(Path(__file__).resolve().parents[2] / "data" / "datasets")
+    if args.output_dir == "datasets":
+        args.output_dir = str(Path(__file__).resolve().parents[2] / "data" / "datasets")
 
     missing_ratios = parse_missing_ratios(args.missing_ratio)
-    if len(missing_ratios) == 1:
-        print(f"缺失比例：{missing_ratios[0]:.2%}")
-    else:
-        print(f"缺失比例列表：{missing_ratios}")
-
+    balanced_contexts = parse_int_list(args.balanced_contexts)
     if args.no_auto_term:
         terms = [args.term] if args.term else ["short"]
         print(f"使用指定的 term: {terms}")
@@ -377,6 +432,10 @@ if __name__ == "__main__":
         block_length=args.block_length,
         max_context=args.max_context,
         seed=args.seed,
+        mode=args.mode,
+        balanced_contexts=balanced_contexts,
+        ratio_tolerance=args.ratio_tolerance,
+        repair_steps=args.repair_steps,
     )
 
     print(f"\n{'=' * 80}")
