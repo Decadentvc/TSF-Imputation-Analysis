@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Iterable, List, Optional
 
 from run_eval import (
+    evaluate_clean,
     find_clean_dataset_path,
     generate_eval_dataset_paths,
     run_single_evaluation,
@@ -152,6 +153,12 @@ def _build_parser() -> argparse.ArgumentParser:
         default="data/datasets/dataset_properties.json",
     )
     parser.add_argument("--output_dir", type=str, default=None)
+    parser.add_argument(
+        "--clean_output_dir",
+        type=str,
+        default=None,
+        help="Output directory for clean evaluation results",
+    )
     parser.add_argument("--imputed_data_dir", type=str, default="data/datasets/Imputed")
     parser.add_argument(
         "--intermediate_dir", type=str, default="data/Intermediate_Predictions"
@@ -168,6 +175,16 @@ def _build_parser() -> argparse.ArgumentParser:
         "--force",
         action="store_true",
         help="Re-run even when result file already exists",
+    )
+    parser.add_argument(
+        "--include_clean",
+        action="store_true",
+        help="Also run clean evaluation in batch mode",
+    )
+    parser.add_argument(
+        "--clean_only",
+        action="store_true",
+        help="Run only clean evaluation (skip imputation evaluation)",
     )
     return parser
 
@@ -215,18 +232,33 @@ def main() -> None:
     if not dataset_terms:
         raise ValueError("No valid dataset-term combinations to run")
 
+    run_clean = args.include_clean or args.clean_only
+    run_impute = not args.clean_only
+
     imputation_methods = _split_multi_values(args.imputation_methods)
-    if not imputation_methods:
-        raise ValueError("--imputation_methods is empty")
-    imputation_methods = _dedupe_lower(imputation_methods)
-    imputation_methods = [m for m in imputation_methods if m != "none"]
-    if not imputation_methods:
-        raise ValueError("No valid imputation methods provided (none is not allowed)")
+    if run_impute:
+        if not imputation_methods:
+            raise ValueError("--imputation_methods is empty")
+        imputation_methods = _dedupe_lower(imputation_methods)
+        imputation_methods = [m for m in imputation_methods if m != "none"]
+        if not imputation_methods:
+            raise ValueError("No valid imputation methods provided (none is not allowed)")
+    else:
+        imputation_methods = []
 
     missing_ratios = _parse_missing_ratios(args.missing_ratios)
 
     output_dir = Path(args.output_dir) if args.output_dir else _default_impute_result_dir(args.model)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    clean_output_dir = (
+        Path(args.clean_output_dir)
+        if args.clean_output_dir
+        else Path("results") / args.model.lower() / "clean"
+    )
+
+    if run_impute:
+        output_dir.mkdir(parents=True, exist_ok=True)
+    if run_clean:
+        clean_output_dir.mkdir(parents=True, exist_ok=True)
 
     total = 0
     skipped = 0
@@ -239,13 +271,54 @@ def main() -> None:
     print(f"Model: {args.model}")
     print(f"Datasets: {list(dataset_terms.keys())}")
     print(f"Terms (requested): {normalized_terms if normalized_terms else 'auto by dataset'}")
-    print(f"Imputation methods: {imputation_methods}")
-    print(f"Missing ratios: {missing_ratios if missing_ratios else 'default from run_eval.py'}")
-    print(f"Output dir: {output_dir}")
+    print(f"Include clean: {run_clean}")
+    print(f"Run imputation: {run_impute}")
+    if run_impute:
+        print(f"Imputation methods: {imputation_methods}")
+        print(f"Missing ratios: {missing_ratios if missing_ratios else 'default from run_eval.py'}")
+        print(f"Impute output dir: {output_dir}")
+    if run_clean:
+        print(f"Clean output dir: {clean_output_dir}")
 
     for dataset, terms in dataset_terms.items():
         print(f"\n--- Dataset: {dataset} | terms={terms} ---")
         clean_data_path = find_clean_dataset_path(dataset, args.base_data_dir)
+
+        if run_clean:
+            for term in terms:
+                total += 1
+                clean_result_path = clean_output_dir / f"{dataset}_clean_{term}_results.csv"
+                if clean_result_path.exists() and not args.force:
+                    skipped += 1
+                    print(f"✓ Skip existing clean result: {clean_result_path}")
+                    continue
+
+                print(f"\n▶ Running clean: {dataset} | term={term}")
+                try:
+                    evaluate_clean(
+                        model=args.model,
+                        model_name=args.model_name,
+                        dataset_name=dataset,
+                        term=term,
+                        base_data_dir=args.base_data_dir,
+                        properties_path=args.properties_path,
+                        output_dir=str(clean_output_dir),
+                        prediction_length=args.prediction_length,
+                        num_samples=args.num_samples,
+                        batch_size=args.batch_size,
+                        device=args.device,
+                        intermediate_dir=args.intermediate_dir,
+                        predict_batches_jointly=args.predict_batches_jointly,
+                        torch_dtype=args.torch_dtype,
+                    )
+                    succeeded += 1
+                except Exception as exc:
+                    failed += 1
+                    print(f"✗ Failed clean: {dataset} / {term} -> {exc}")
+
+        if not run_impute:
+            continue
+
         eval_paths_with_terms = generate_eval_dataset_paths(
             dataset_name=dataset,
             method=args.method,
