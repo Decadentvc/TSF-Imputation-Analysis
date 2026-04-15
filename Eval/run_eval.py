@@ -1,5 +1,5 @@
 """
-通用评估脚本：支持 sundial / chronos2。
+通用评估脚本：支持 sundial / chronos2 / timesfm2p5。
 旧脚本 run_sundial.py 暂保留，本文件为新入口。
 """
 
@@ -22,7 +22,7 @@ from impute_dataset import generate_imputed_dataset_path, impute_dataset
 from model_registry import build_model_adapter
 
 
-ALLOWED_MISSING_METHODS = {"MCAR", "BM", "TM", "TVMR"}
+ALLOWED_MISSING_METHODS = {"BM"}
 
 
 def parse_eval_dataset_name(eval_path: str) -> Tuple[str, str]:
@@ -316,7 +316,8 @@ def run_single_evaluation(
     mode = "clean" if is_clean_mode else "impute"
     out_dir = output_dir or _default_result_subdir(model, mode)
     if mode == "impute":
-        filename = f"{imputation_method.lower()}_{eval_name}_{term}_results.csv"
+        method_name = imputation_method if imputation_method is not None else "none"
+        filename = f"{method_name.lower()}_{eval_name}_{term}_results.csv"
     else:
         filename = f"{eval_name}_{term}_results.csv"
 
@@ -514,7 +515,10 @@ def _build_parser() -> argparse.ArgumentParser:
 
     def add_common_args(p):
         p.add_argument(
-            "--model", type=str, default="sundial", choices=["sundial", "chronos2"]
+            "--model",
+            type=str,
+            default="sundial",
+            choices=["sundial", "chronos2", "timesfm2p5"],
         )
         p.add_argument("--model_name", type=str, default=None)
         p.add_argument("--base_data_dir", type=str, default="data/datasets")
@@ -546,9 +550,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     batch = subparsers.add_parser("batch", help="Batch evaluate missing datasets")
     batch.add_argument("--dataset", type=str, required=True)
-    batch.add_argument(
-        "--method", type=str, required=True, choices=["MCAR", "BM", "TM", "TVMR"]
-    )
+    batch.add_argument("--method", type=str, required=True, choices=["BM"])
     batch.add_argument("--missing_ratios", type=str, default=None)
     batch.add_argument("--imputation_methods", type=str, default=None)
     batch.add_argument("--block_length", type=int, default=None)

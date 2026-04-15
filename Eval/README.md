@@ -1,242 +1,155 @@
-# 中间预测结果保存功能说明
+# 通用模型评估说明（run_eval）
 
-## 概述
+本文件对应新入口 `Eval/run_eval.py`，用于统一评估不同时序模型。旧版 `Eval/run_sundial.py` / `Eval/eval_sundial.py` 仍保留。
 
-在评估过程中，系统会自动保存每个预测窗口的中间预测结果，方便后续分析和调试。
-
-## 功能特性
-
-1. **按窗口拆分保存**：每个预测窗口的结果保存为独立文件
-2. **只保存关键信息**：每个文件包含时序列和 mean 预测值
-3. **按评估任务组织**：根据评估任务名称创建子目录，同一任务的所有窗口预测结果保存在同一目录
-4. **按填补方法分类**：不同填补方法的预测结果保存到各自的子目录，避免互相覆盖
-5. **自动创建目录结构**：根据评估数据集名称和填补方法自动创建子目录
-6. **单次和批量评估均支持**：两种评估模式都会自动保存中间结果
-
-## 保存路径
-
-```
-datasets/Intermediate_Predictions/
-├── ETTh1_MCAR_005_short_prediction/
-│   ├── linear/                              # 填补方法子目录
-│   │   ├── ETTh1_MCAR_005_short_prediction_0.csv
-│   │   ├── ETTh1_MCAR_005_short_prediction_1.csv
-│   │   └── ...
-│   ├── mean/
-│   │   ├── ETTh1_MCAR_005_short_prediction_0.csv
-│   │   └── ...
-│   └── forward/
-│       └── ...
-├── ETTh1_BM_010_long_prediction/
-│   ├── linear/
-│   │   └── ...
-│   └── mean/
-│       └── ...
-├── ETTh1_clean_short_prediction/            # 干净数据（无填补方法子目录）
-│   ├── ETTh1_clean_short_prediction_0.csv
-│   ├── ETTh1_clean_short_prediction_1.csv
-│   └── ...
-└── exchange_rate_MCAR_005_medium_prediction/
-    └── ...
-```
-
-## 目录结构
-
-### 填补数据预测结果
-
-每个评估任务创建一个子目录，并按填补方法再分目录：
-
-```
-[eval_data_name]_prediction/[imputation_method]/
-```
-
-示例：
-- `ETTh1_MCAR_005_short_prediction/linear/` - ETTh1 数据集，MCAR 模式，5% 缺失率，short term，linear 填补的预测结果
-- `ETTh1_BM_010_long_prediction/mean/` - ETTh1 数据集，BM 模式，10% 缺失率，long term，mean 填补的预测结果
-
-### 干净数据预测结果
-
-干净数据评估不包含填补方法子目录：
-
-```
-[dataset_name]_clean_[term]_prediction/
-```
-
-示例：
-- `ETTh1_clean_short_prediction/` - ETTh1 干净数据，short term 的预测结果
-
-## 文件命名格式
-
-```
-[eval_data_name]_prediction_[window_index].csv
-```
-
-示例：
-- `ETTh1_MCAR_005_short_prediction_0.csv` - 第 0 个预测窗口
-- `ETTh1_MCAR_005_short_prediction_1.csv` - 第 1 个预测窗口
-- `ETTh1_MCAR_005_short_prediction_2.csv` - 第 2 个预测窗口
-
-## 文件内容格式
-
-每个 CSV 文件包含两列：
-
-| 列名 | 说明 |
-|------|------|
-| `date` | 时间序列（从预测窗口的起始时间开始） |
-| `prediction` | 预测值（mean） |
-
-示例：
-```csv
-date,prediction
-2018-05-17 20:00:00,13.536441
-2018-05-17 21:00:00,13.311673
-2018-05-17 22:00:00,13.114555
-...
-```
-
-## 使用方法
-
-### 批量评估（推荐）
-
-使用 `eval_clean_vs_imputed.py` 进行批量评估：
+## 快速运行指令（放在最前）
 
 ```bash
-# 评估所有数据集，使用所有填补方法
-python eval/eval_clean_vs_imputed.py --all_datasets --method BM --imputation_methods all --device cuda
-
-# 评估所有数据集，指定填补方法
-python eval/eval_clean_vs_imputed.py --all_datasets --method BM --imputation_methods linear,mean,forward,backward --device cuda
-
-# 评估单个数据集
-python eval/eval_clean_vs_imputed.py --dataset ETTh1 --method BM --imputation_methods linear,mean --device cuda
-
-# 指定缺失率
-python eval/eval_clean_vs_imputed.py --all_datasets --method BM --missing_ratios 0.10,0.20,0.30 --imputation_methods linear --device cuda
+python Eval/run_eval.py clean --model sundial --dataset ETTh1 --term short
+python Eval/run_eval.py clean --model chronos2 --dataset ETTh1 --term short
+python Eval/run_eval.py clean --model timesfm2p5 --dataset ETTh1 --term short
+python Eval/run_eval.py single --model chronos2 --eval_data_path "data/datasets/Block_Missing/BM_010/ETTh1_BM_length50_010_short.csv" --imputation_method linear
+python Eval/run_eval.py batch --model sundial --dataset ETTh1 --method BM --missing_ratios "0.10,0.20,0.30" --imputation_methods "linear,mean,forward"
+python Eval/run_eval.py batch --model timesfm2p5 --dataset ETTh1 --method BM --imputation_methods "linear,mean"
 ```
 
-### 参数说明
+### 指令说明
 
-| 参数 | 说明 |
-|------|------|
-| `--all_datasets` | 遍历 dataset_properties.json 中的所有数据集 |
-| `--dataset` | 指定单个数据集名称 |
-| `--method` | 缺失模式（MCAR/BM/TM/TVMR） |
-| `--missing_ratios` | 缺失率列表，逗号分隔 |
-| `--imputation_methods` | 填补方法列表，逗号分隔；使用 `all` 表示全部 |
-| `--device` | 推理设备（cuda/cpu） |
-| `--force` | 强制重新计算，覆盖已有结果 |
+- `clean`：使用干净数据评估，`eval_data_path == clean_data_path`
+- `single`：评估单个缺失数据文件，必须传 `--imputation_method`（不允许 `none`）
+- `batch`：按缺失率、term、填补方法批量评估
+- 若未传 `--prediction_length`，会按 `frequency + term` 自动计算
 
-### 可用填补方法
+## 可用模型与切换方式（放在指令说明后）
 
-| 方法 | 说明 |
-|------|------|
-| `none` | 不填补（保留缺失值） |
-| `zero` | 零值填补 |
-| `mean` | 均值填补 |
-| `forward` | 前向填充 |
-| `backward` | 后向填充 |
-| `linear` | 线性插值 |
-| `nearest` | 最近邻插值 |
-| `spline` | 样条插值 |
-| `seasonal` | 季节性分解填补 |
+当前 `--model` 可选：
+- `sundial`
+- `chronos2`
+- `timesfm2p5`
 
-## 输出示例
+### 使用不同模型时需要改什么
 
-```
-================================================================================
-Saving Intermediate Predictions
-================================================================================
-  Dataset: ETTh1
-  Eval data: ETTh1_MCAR_005_short
-  Imputation method: linear
-  Prediction length: 48
-  Frequency: H
-  Number of windows: 20
+- 只改命令行中的 `--model`，其余流程（数据加载、窗口生成、指标评估、结果保存）不需要改
+- 如需指定不同权重，使用 `--model_name`
+- 模型特有参数：
+  - `sundial`：主要使用 `--num_samples`
+  - `chronos2`：可用 `--predict_batches_jointly`、`--torch_dtype`
+  - `timesfm2p5`：通常只需 `--batch_size`、`--device`（`--model_name` 可覆盖默认 checkpoint）
 
-  Sample output (window 0):
-    File: datasets/Intermediate_Predictions/ETTh1_MCAR_005_short_prediction/linear/ETTh1_MCAR_005_short_prediction_0.csv
-    Shape: (48, 2)
-    Mean range: [10.5573, 13.7013]
-    Date range: 2018-05-17 20:00:00 to 2018-05-19 19:00:00
+### 如何添加新模型
 
-  ✅ Saved 20 prediction windows to: datasets/Intermediate_Predictions/ETTh1_MCAR_005_short_prediction/linear
-================================================================================
-```
+按以下固定步骤扩展：
+
+1. 在 `Eval/model_adapters.py` 新增 Adapter（实现统一接口 `predict(test_data_input)`，返回 `SampleForecast` 或 `QuantileForecast`）
+2. 在 `Eval/model_registry.py` 的 `build_model_adapter(...)` 注册模型字符串到 Adapter 的映射
+3. 在 `Eval/run_eval.py` 的 `--model` 参数 `choices` 中加入新模型名
+4. （可选）在本 README 的“快速运行指令”和“参数说明”补充该模型示例
+
+说明：`Eval/eval_pipeline.py` 是模型无关评估管线，正常情况下不需要改。
+
+## 目标
+
+- 使用同一套 CLI 评估不同模型
+- 抽离模型无关流程（数据加载、窗口构造、指标计算、结果保存）
+- 模型相关逻辑集中在适配层，便于持续扩展
+
+## 文件结构
+
+- `Eval/run_eval.py`：CLI 入口（`single` / `batch` / `clean`）
+- `Eval/eval_pipeline.py`：通用评估管线
+- `Eval/model_registry.py`：模型注册与构建
+- `Eval/model_adapters.py`：模型适配器实现
+
+## 目录约定
+
+### 数据目录（模型共享）
+
+- `data/datasets/ori/`
+- `data/datasets/Block_Missing/`
+- `data/datasets/Imputed/`
+- `data/datasets/dataset_properties.json`
+
+说明：数据目录不按模型拆分，所有模型共用。
+
+### 中间预测（按模型区分）
+
+- `data/Intermediate_Predictions/<model>/...`
+
+例如：
+- `data/Intermediate_Predictions/sundial/...`
+- `data/Intermediate_Predictions/chronos2/...`
+- `data/Intermediate_Predictions/timesfm2p5/...`
+
+### 最终评测结果（按模型区分）
+
+- `results/<model>/clean/...`
+- `results/<model>/impute/...`
+
+说明：
+- `clean`：干净数据评估
+- `impute`：缺失数据先填补再评估
+- 当前逻辑不保留 missing 场景的 `none`（不填补）分支
+
+## 运行模式
+
+`run_eval.py` 支持 3 种模式：
+
+- `single`：单个缺失文件评估（必须指定填补方法）
+- `batch`：按数据集、缺失率、term、填补方法批量评估
+- `clean`：干净数据评估
 
 ## 参数说明
 
-### 预测长度
+### 通用参数
 
-每个文件的行数等于预测长度（prediction_length），由以下因素决定：
-- **数据频率**：从 `dataset_properties.json` 读取
-- **term 类型**：short/medium/long
-- **计算公式**：`prediction_length = base_length × term_multiplier`
+- `--model`：模型类型（`sundial` / `chronos2` / `timesfm2p5`）
+- `--model_name`：模型权重名称（可选）
+- `--base_data_dir`：数据根目录（默认 `data/datasets`）
+- `--properties_path`：属性文件（默认 `data/datasets/dataset_properties.json`）
+- `--output_dir`：结果输出目录（可选；默认按模型自动分流）
+- `--prediction_length`：预测长度（可选；不传则自动计算）
+- `--batch_size`：推理批次大小
+- `--device`：运行设备（如 `cpu`、`cuda:0`）
+- `--num_samples`：采样数（主要用于 `sundial`）
+- `--intermediate_dir`：中间结果根目录（默认 `data/Intermediate_Predictions`）
 
-示例：
-- ETTh1 (频率: H, term: short) → prediction_length = 48
-- ETTh1 (频率: H, term: medium) → prediction_length = 480
-- ETTh1 (频率: H, term: long) → prediction_length = 720
+### Chronos-2 相关参数
 
-### 窗口数量
+- `--predict_batches_jointly`：是否 joint 预测批次
+- `--torch_dtype`：`bfloat16` / `float16` / `float32`
 
-窗口数量由数据集长度和预测长度决定，计算公式：
-```
-windows = min(max(1, ceil(0.6 * dataset_length / prediction_length)), 20)
-```
+说明：
+- 不同模型参数由适配器处理
+- 某模型不使用的参数会被忽略，不影响运行
 
-示例：
-- ETTh1 short: 20 个窗口
-- ETTh1 medium: 约 180 个窗口
-- ETTh1 long: 约 49 个窗口
+## 输出文件命名
 
-## 应用场景
+### clean
 
-1. **预测结果分析**：查看每个窗口的预测值分布
-2. **异常检测**：识别预测异常的窗口
-3. **方法对比**：比较不同填补方法对预测结果的影响
-4. **调试辅助**：定位评估过程中的问题
+- `results/<model>/clean/{dataset}_clean_{term}_results.csv`
 
-## 注意事项
+### impute
 
-1. **存储空间**：批量评估会产生大量文件，请确保有足够的存储空间
-2. **目录隔离**：不同填补方法的预测结果保存在不同子目录，不会互相覆盖
-3. **性能影响**：保存中间结果对评估性能影响很小
-4. **数据完整性**：每个窗口的预测长度固定，不会因为边界而变化
+- `results/<model>/impute/{impute_method}_{eval_name}_{term}_results.csv`
 
-## 相关文件
+### 中间预测
 
-- [run_sundial.py](file:///d:/Projects/GitHub/TSF-Imputation-Analysis/eval/run_sundial.py) - 评估脚本（包含保存逻辑）
-- [eval_sundial.py](file:///d:/Projects/GitHub/TSF-Imputation-Analysis/eval/eval_sundial.py) - 核心评估模块（返回预测结果）
-- [eval_clean_vs_imputed.py](file:///d:/Projects/GitHub/TSF-Imputation-Analysis/eval/eval_clean_vs_imputed.py) - 统一评估脚本
-- [dataset_properties.json](file:///d:/Projects/GitHub/TSF-Imputation-Analysis/datasets/dataset_properties.json) - 数据集属性配置
+- clean（无填补）：`data/Intermediate_Predictions/<model>/{eval_name}_prediction/{eval_name}_prediction_{window_idx}.csv`
+- impute（有填补）：`data/Intermediate_Predictions/<model>/{eval_name}_prediction/{imputation_method}/{eval_name}_prediction_{window_idx}.csv`
 
-## 技术细节
+## 依赖
 
-### 实现原理
+按模型场景安装依赖：
 
-1. **预测结果获取**：
-   - `evaluate_sundial()` 返回包含 `forecasts` 的结果字典
-   - 每个 `forecast` 是 `SampleForecast` 对象，包含多个采样结果
+- 通用：`numpy`, `pandas`, `torch`, `gluonts`, `transformers`, `tqdm`
+- `chronos2`：`chronos-forecasting>=2.1`
+- `timesfm2p5`：`timesfm`（需包含 `timesfm_2p5_torch`）
 
-2. **统计量计算**：
-   - `forecast.mean`：计算所有采样的均值
-   - `forecast.quantile(0.5)`：计算 0.5 分位数（中位数）
+如报 `ModuleNotFoundError`，请先在当前环境补齐依赖。
 
-3. **文件保存**：
-   - 使用 pandas DataFrame 保存为 CSV
-   - 每个窗口一个文件，便于单独分析
-   - 按填补方法创建子目录，避免覆盖
+## 常见注意事项
 
-### 代码位置
-
-- 保存函数：`run_sundial.save_intermediate_predictions()`
-- 调用位置：
-  - `eval_clean_vs_imputed.py` 中的 `evaluate_imputed_datasets()` 函数
-  - `run_sundial.py` 中的 `run_evaluation()` 函数
-  - `run_sundial.py` 中的 `batch_evaluate()` 函数
-  - `run_sundial.py` 中的 `evaluate_clean()` 函数
-
----
-
-**更新时间**：2026-04-11
-**版本**：2.0
+- `single` 模式缺失数据评估必须提供 `--imputation_method`，且不能是 `none`
+- `batch` 模式默认不包含 `none` 填补方法
+- `term` 必须与数据任务匹配：`short` / `medium` / `long`
+- `dataset_properties.json` 必须包含对应数据集的 `frequency` 与 `term` 信息

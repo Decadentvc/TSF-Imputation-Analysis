@@ -223,12 +223,98 @@ class Chronos2Adapter:
                 model_batch_size //= 2
 
         forecasts: List[QuantileForecast] = []
+        q_levels: List[float]
+        if self.quantile_levels is None:
+            q_levels = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+        else:
+            q_levels = self.quantile_levels
         for item, ts in zip(quantiles, input_entries):
             forecast_start_date = ts["start"] + len(ts["target"])
             forecasts.append(
                 QuantileForecast(
                     forecast_arrays=item,
-                    forecast_keys=list(map(str, self.quantile_levels)),
+                    forecast_keys=list(map(str, q_levels)),
+                    start_date=forecast_start_date,
+                )
+            )
+        return forecasts
+
+
+@dataclass
+class TimesFM2p5Adapter:
+    """TimesFM-2.5 预测器适配器。"""
+
+    prediction_length: int
+    batch_size: int = 128
+    model_name: str = "google/timesfm-2.5-200m-pytorch"
+    device: str = "cpu"
+
+    def __post_init__(self):
+        try:
+            from timesfm import configs
+            from timesfm.timesfm_2p5 import timesfm_2p5_torch
+        except ImportError as exc:  # pragma: no cover
+            raise ImportError(
+                "timesfm 未安装。请先安装并确保包含 TimesFM-2.5: pip install -e /path/to/timesfm"
+            ) from exc
+
+        self.configs = configs
+        self.tfm = timesfm_2p5_torch.TimesFM_2p5_200M_torch(device=self.device)
+        self.tfm.load_checkpoint(repo_id=self.model_name)
+        self.quantiles = list(np.arange(1, 10) / 10.0)
+
+    @staticmethod
+    def _extract_input_entry(entry: Any) -> Dict[str, Any]:
+        if isinstance(entry, tuple):
+            return entry[0]
+        return entry
+
+    def predict(self, test_data_input) -> List[QuantileForecast]:
+        input_entries = [self._extract_input_entry(x) for x in list(test_data_input)]
+        forecast_outputs = []
+
+        for batch in tqdm(batcher(input_entries, batch_size=self.batch_size)):
+            context = []
+            max_context = 0
+
+            for entry in batch:
+                arr = np.array(entry["target"])
+                if max_context < arr.shape[0]:
+                    max_context = arr.shape[0]
+                context.append(arr)
+
+            max_context = (
+                (max_context + self.tfm.model.p - 1) // self.tfm.model.p
+            ) * self.tfm.model.p
+            self.tfm.compile(
+                forecast_config=self.configs.ForecastConfig(
+                    max_context=min(15360, max_context),
+                    max_horizon=1024,
+                    infer_is_positive=True,
+                    use_continuous_quantile_head=True,
+                    fix_quantile_crossing=True,
+                    force_flip_invariance=True,
+                    return_backcast=False,
+                    normalize_inputs=True,
+                    per_core_batch_size=self.batch_size,
+                )
+            )
+
+            _, full_preds = self.tfm.forecast(
+                horizon=self.prediction_length,
+                inputs=context,
+            )
+            full_preds = full_preds[:, 0 : self.prediction_length, 1:]
+            forecast_outputs.append(full_preds.transpose((0, 2, 1)))
+
+        forecast_outputs = np.concatenate(forecast_outputs)
+        forecasts: List[QuantileForecast] = []
+        for item, ts in zip(forecast_outputs, input_entries):
+            forecast_start_date = ts["start"] + len(ts["target"])
+            forecasts.append(
+                QuantileForecast(
+                    forecast_arrays=item,
+                    forecast_keys=list(map(str, self.quantiles)),
                     start_date=forecast_start_date,
                 )
             )
