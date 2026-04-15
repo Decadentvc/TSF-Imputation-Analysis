@@ -21,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 def get_dataset_properties() -> Dict[str, Any]:
     """读取数据集属性配置"""
-    props_path = Path(__file__).parent.parent / "datasets" / "dataset_properties.json"
+    props_path = Path(__file__).parent.parent / "data" / "datasets" / "dataset_properties.json"
     with open(props_path, 'r', encoding='utf-8') as f:
         return json.load(f)
 
@@ -272,7 +272,7 @@ def evaluate_imputed_data(
 
 
 def get_all_imputed_files(
-    base_dir: str = "datasets/Imputed",
+    base_dir: str = "data/datasets/imputed",
 ) -> List[Dict[str, Any]]:
     """
     获取所有填补数据文件信息
@@ -312,7 +312,7 @@ def get_all_imputed_files(
 
 
 def run_batch_evaluation(
-    output_dir: str = "results/imputed_evaluation",
+    output_dir: str = "results_analysis/imputed_evaluation",
     datasets: Optional[List[str]] = None,
     terms: Optional[List[str]] = None,
     impute_methods: Optional[List[str]] = None,
@@ -348,7 +348,7 @@ def run_batch_evaluation(
     print(f"  找到 {len(imputed_files)} 个填补数据文件")
     
     dataset_props = json.loads(
-        (Path(__file__).parent.parent / "datasets" / "dataset_properties.json").read_text()
+        (Path(__file__).parent.parent / "data" / "datasets" / "dataset_properties.json").read_text()
     )
     
     results = {
@@ -390,7 +390,7 @@ def run_batch_evaluation(
             continue
         
         freq = dataset_props[dataset]["frequency"]
-        original_path = Path(__file__).parent.parent / "datasets" / "ori" / f"{dataset}.csv"
+        original_path = Path(__file__).parent.parent / "data" / "datasets" / "ori" / f"{dataset}.csv"
         
         if not original_path.exists():
             print(f"  [跳过] 原始数据文件不存在: {original_path}")
@@ -438,7 +438,7 @@ def main():
     import argparse
     
     parser = argparse.ArgumentParser(description="填补数据评估工具")
-    parser.add_argument("--output_dir", type=str, default="results/imputed_evaluation",
+    parser.add_argument("--output_dir", type=str, default="results_analysis/imputed_evaluation",
                        help="输出目录")
     parser.add_argument("--datasets", type=str, default=None,
                        help="指定数据集，逗号分隔")

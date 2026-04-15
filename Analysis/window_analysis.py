@@ -16,13 +16,44 @@ import sys
 import re
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-sys.path.append(str(Path(__file__).parent.parent / "Missing_Value_Injection" / "for_sundial"))
-from inject_range_utils import get_injection_range, Term
+sys.path.append(str(Path(__file__).parent.parent / "tools" / "Missing_Value_Injection"))
+from inject_range_utils import get_injection_range
 
 from Analysis.metrics import (
     calculate_all_metrics,
     get_period,
 )
+
+
+DEFAULT_DATA_PATH = "data/datasets"
+DEFAULT_PROPERTIES_PATH = "data/datasets/dataset_properties.json"
+DEFAULT_MODEL_PROPERTIES_PATH = "Eval/model_properties.json"
+
+
+def load_model_properties(model_properties_path: str = DEFAULT_MODEL_PROPERTIES_PATH) -> Dict[str, Any]:
+    props_path = Path(model_properties_path)
+    if not props_path.exists():
+        raise FileNotFoundError(f"Model properties not found: {props_path}")
+    with open(props_path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def get_model_max_context(
+    model: str,
+    model_properties_path: str = DEFAULT_MODEL_PROPERTIES_PATH,
+) -> int:
+    model_props = load_model_properties(model_properties_path)
+    model_key = model.lower()
+    if model_key not in model_props:
+        available = ", ".join(sorted(model_props.keys()))
+        raise ValueError(f"Model '{model}' not found in model properties. Available: {available}")
+
+    max_context = model_props[model_key].get("max_context")
+    if max_context is None:
+        raise ValueError(f"Model '{model}' missing required field: max_context")
+    if not isinstance(max_context, int) or max_context <= 0:
+        raise ValueError(f"Model '{model}' has invalid max_context: {max_context}")
+    return max_context
 
 
 def parse_prediction_dirname(dirname: str) -> Optional[Dict[str, Any]]:
@@ -179,7 +210,8 @@ def analyze_single_window(
 
 def analyze_prediction_windows(
     prediction_dir: str,
-    properties_path: str = "datasets/dataset_properties.json",
+    properties_path: str = DEFAULT_PROPERTIES_PATH,
+    model: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     分析预测目录下所有窗口的特征指标
@@ -228,6 +260,14 @@ def analyze_prediction_windows(
         print(f"  填补方法: {imputation_method}")
     print(f"{'='*80}")
     
+    resolved_model = model
+    if resolved_model is None:
+        if pred_path.parent.name and pred_path.parent.name != "Intermediate_Predictions":
+            if pred_path.parent.parent.name == "Intermediate_Predictions":
+                resolved_model = pred_path.parent.name
+            elif pred_path.parent.parent.parent.name == "Intermediate_Predictions":
+                resolved_model = pred_path.parent.parent.name
+
     period = get_period(dir_info['dataset'], properties_path) if dir_info['dataset'] else None
     if period is None:
         raise ValueError(f"Dataset name missing for directory: {pred_path.name}")
@@ -294,6 +334,7 @@ def analyze_prediction_windows(
     
     return {
         "success": True,
+        "model": resolved_model,
         "dir_info": dir_info,
         "imputation_method": imputation_method,
         "n_windows": len(window_results),
@@ -305,9 +346,11 @@ def analyze_prediction_windows(
 
 def analyze_history_windows(
     dataset_name: str,
+    model: str,
     term: str = "short",
-    data_path: str = "datasets",
-    properties_path: str = "datasets/dataset_properties.json",
+    data_path: str = DEFAULT_DATA_PATH,
+    properties_path: str = DEFAULT_PROPERTIES_PATH,
+    model_properties_path: str = DEFAULT_MODEL_PROPERTIES_PATH,
 ) -> Dict[str, Any]:
     """
     分析原始数据中每个历史窗口的特征指标
@@ -327,14 +370,18 @@ def analyze_history_windows(
     print(f"\n{'='*80}")
     print(f"分析历史窗口特征")
     print(f"{'='*80}")
+    print(f"  模型: {model}")
     print(f"  数据集: {dataset_name}")
     print(f"  Term: {term}")
     print(f"{'='*80}")
+
+    max_context = get_model_max_context(model, model_properties_path)
     
     inject_range = get_injection_range(
         dataset_name=dataset_name,
         term=term,
         data_path=data_path,
+        max_context=max_context,
     )
     
     n_windows = inject_range['windows']
@@ -446,6 +493,7 @@ def analyze_history_windows(
     
     return {
         "success": True,
+        "model": model,
         "dataset": dataset_name,
         "term": term,
         "inject_range": inject_range,
@@ -483,12 +531,14 @@ def parse_imputed_filename(filename: str) -> Optional[Dict[str, Any]]:
 
 def analyze_imputed_history_windows(
     dataset_name: str,
+    model: str,
     method: str = "BM",
     ratio: float = 0.1,
     term: str = "short",
     impute_method: str = "linear",
-    data_path: str = "datasets",
-    properties_path: str = "datasets/dataset_properties.json",
+    data_path: str = DEFAULT_DATA_PATH,
+    properties_path: str = DEFAULT_PROPERTIES_PATH,
+    model_properties_path: str = DEFAULT_MODEL_PROPERTIES_PATH,
 ) -> Dict[str, Any]:
     """
     分析填补数据中每个历史窗口的特征指标
@@ -508,17 +558,21 @@ def analyze_imputed_history_windows(
     print(f"\n{'='*80}")
     print(f"分析填补数据历史窗口特征")
     print(f"{'='*80}")
+    print(f"  模型: {model}")
     print(f"  数据集: {dataset_name}")
     print(f"  缺失方法: {method}")
     print(f"  缺失比例: {ratio}")
     print(f"  Term: {term}")
     print(f"  填补方法: {impute_method}")
     print(f"{'='*80}")
+
+    max_context = get_model_max_context(model, model_properties_path)
     
     inject_range = get_injection_range(
         dataset_name=dataset_name,
         term=term,
         data_path=data_path,
+        max_context=max_context,
     )
     
     n_windows = inject_range['windows']
@@ -532,7 +586,7 @@ def analyze_imputed_history_windows(
     print(f"    历史窗口长度: {max_context}")
     
     ratio_str = f"{int(ratio * 100):03d}"
-    imputed_path = Path(data_path) / "Imputed" / method / f"{method}_{ratio_str}" / f"{dataset_name}_{method}_{ratio_str}_{term}_{impute_method}.csv"
+    imputed_path = Path(data_path) / "imputed" / method / f"{method}_{ratio_str}" / f"{dataset_name}_{method}_{ratio_str}_{term}_{impute_method}.csv"
     
     if not imputed_path.exists():
         raise FileNotFoundError(f"Imputed data not found: {imputed_path}")
@@ -632,6 +686,7 @@ def analyze_imputed_history_windows(
     
     return {
         "success": True,
+        "model": model,
         "dataset": dataset_name,
         "method": method,
         "ratio": ratio,
@@ -650,7 +705,7 @@ def get_available_impute_methods(
     method: str = "BM",
     ratio: float = 0.1,
     term: str = "short",
-    data_path: str = "datasets",
+    data_path: str = DEFAULT_DATA_PATH,
 ) -> List[str]:
     """
     获取可用的填补方法列表
@@ -666,7 +721,7 @@ def get_available_impute_methods(
         可用的填补方法列表
     """
     ratio_str = f"{int(ratio * 100):03d}"
-    imputed_dir = Path(data_path) / "Imputed" / method / f"{method}_{ratio_str}"
+    imputed_dir = Path(data_path) / "imputed" / method / f"{method}_{ratio_str}"
     
     if not imputed_dir.exists():
         return []
@@ -693,10 +748,63 @@ def save_results(results: Dict[str, Any], output_path: str):
     print(f"\n  结果已保存: {output_file}")
 
 
+def build_default_output_path(
+    mode: str,
+    model: str,
+    output_root: str = "results_analysis",
+    dataset: Optional[str] = None,
+    term: Optional[str] = None,
+    prediction_dir: Optional[str] = None,
+) -> str:
+    root = Path(output_root) / model.lower()
+    if mode == "prediction":
+        if prediction_dir is None:
+            raise ValueError("prediction mode requires prediction_dir")
+        return str(root / "predictions" / f"{Path(prediction_dir).name}.json")
+
+    if mode == "history":
+        if dataset is None or term is None:
+            raise ValueError("history mode requires dataset and term")
+        return str(root / "clean_history" / f"{dataset}_{term}.json")
+
+    raise ValueError(f"Unsupported mode for default output: {mode}")
+
+
 if __name__ == "__main__":
     import argparse
     
     parser = argparse.ArgumentParser(description="窗口特征分析工具")
+    parser.add_argument(
+        "--model",
+        type=str,
+        required=True,
+        help="模型名称（用于分窗配置与结果归档）",
+    )
+    parser.add_argument(
+        "--data_path",
+        type=str,
+        default=DEFAULT_DATA_PATH,
+        help=f"数据集根目录（默认: {DEFAULT_DATA_PATH}）",
+    )
+    parser.add_argument(
+        "--properties_path",
+        type=str,
+        default=DEFAULT_PROPERTIES_PATH,
+        help=f"数据集属性路径（默认: {DEFAULT_PROPERTIES_PATH}）",
+    )
+    parser.add_argument(
+        "--model_properties_path",
+        type=str,
+        default=DEFAULT_MODEL_PROPERTIES_PATH,
+        help=f"模型属性路径（默认: {DEFAULT_MODEL_PROPERTIES_PATH}）",
+    )
+    parser.add_argument(
+        "--output_root",
+        type=str,
+        default="results_analysis",
+        help="结果输出根目录（默认: results_analysis）",
+    )
+
     subparsers = parser.add_subparsers(dest="mode", help="分析模式")
     
     parser_prediction = subparsers.add_parser("prediction", help="分析预测窗口特征")
@@ -742,12 +850,40 @@ if __name__ == "__main__":
     
     try:
         results = None
+        output_path = args.output
         if args.mode == "prediction":
-            results = analyze_prediction_windows(args.prediction_dir)
+            results = analyze_prediction_windows(
+                args.prediction_dir,
+                properties_path=args.properties_path,
+                model=args.model,
+            )
+            if output_path is None:
+                output_path = build_default_output_path(
+                    mode="prediction",
+                    model=args.model,
+                    output_root=args.output_root,
+                    prediction_dir=args.prediction_dir,
+                )
         elif args.mode == "history":
-            results = analyze_history_windows(args.dataset, args.term)
-        if args.output and results is not None:
-            save_results(results, args.output)
+            results = analyze_history_windows(
+                dataset_name=args.dataset,
+                model=args.model,
+                term=args.term,
+                data_path=args.data_path,
+                properties_path=args.properties_path,
+                model_properties_path=args.model_properties_path,
+            )
+            if output_path is None:
+                output_path = build_default_output_path(
+                    mode="history",
+                    model=args.model,
+                    output_root=args.output_root,
+                    dataset=args.dataset,
+                    term=args.term,
+                )
+
+        if output_path and results is not None:
+            save_results(results, output_path)
             
     except Exception as e:
         print(f"\n[错误] {e}")
