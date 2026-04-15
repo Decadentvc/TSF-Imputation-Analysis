@@ -141,6 +141,7 @@ class Chronos2Adapter:
     quantile_levels: Optional[List[float]] = None
     predict_batches_jointly: bool = False
     torch_dtype: Optional[str] = None
+    max_context: int = 8192
 
     def __post_init__(self):
         try:
@@ -184,7 +185,10 @@ class Chronos2Adapter:
         packed = []
         for entry in items:
             item = self._extract_input_entry(entry)
-            packed.append({"target": item["target"]})
+            target = np.asarray(item["target"])
+            if self.max_context > 0 and target.shape[0] > self.max_context:
+                target = target[-self.max_context :]
+            packed.append({"target": target})
         return packed
 
     def predict(self, test_data_input) -> List[QuantileForecast]:
@@ -248,6 +252,7 @@ class TimesFM2p5Adapter:
     batch_size: int = 128
     model_name: str = "google/timesfm-2.5-200m-pytorch"
     device: str = "cpu"
+    max_context: int = 4096
 
     def __post_init__(self):
         try:
@@ -288,7 +293,7 @@ class TimesFM2p5Adapter:
             ) * self.tfm.model.p
             self.tfm.compile(
                 forecast_config=self.configs.ForecastConfig(
-                    max_context=min(15360, max_context),
+                    max_context=min(self.max_context, max_context),
                     max_horizon=1024,
                     infer_is_positive=True,
                     use_continuous_quantile_head=True,
