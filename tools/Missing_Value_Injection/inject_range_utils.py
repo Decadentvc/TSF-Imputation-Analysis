@@ -1,18 +1,11 @@
-"""
-Sundial 模型注错区间确定工具
+"""注错区间确定工具。"""
 
-用于计算 Sundial 模型评估时的注错区间起止位置。
-供各种缺失值注入模式调用。
-"""
-
-import os
 import json
 import math
 import warnings
-import numpy as np
 import pandas as pd
 from pathlib import Path
-from typing import Tuple, Optional, Union
+from typing import Union
 from enum import Enum
 
 from pandas.tseries.frequencies import to_offset
@@ -25,9 +18,6 @@ warnings.filterwarnings('ignore', category=FutureWarning, message=".*'H' is depr
 # ============================================================================
 # 常量定义
 # ============================================================================
-
-# Sundial 模型的最大回顾窗口（硬编码值）
-MAX_CONTEXT_SUNDIAL = 2880
 
 # 测试集比例
 TEST_SPLIT = 0.6
@@ -44,12 +34,11 @@ class Term(Enum):
 
     @property
     def multiplier(self) -> int:
-        if self == Term.SHORT:
-            return 1
-        elif self == Term.MEDIUM:
-            return 10
-        elif self == Term.LONG:
-            return 15
+        return {
+            Term.SHORT: 1,
+            Term.MEDIUM: 10,
+            Term.LONG: 15,
+        }[self]
 
 
 # 非 M4 数据集的 prediction length 映射表
@@ -80,7 +69,11 @@ def load_dataset_properties(data_path: str) -> dict:
     """加载数据集属性配置文件"""
     config_path = Path(data_path) / "dataset_properties.json"
     if not config_path.exists():
-        raise FileNotFoundError(f"Dataset properties not found: {config_path}")
+        fallback = Path(__file__).resolve().parents[2] / "data" / "datasets" / "dataset_properties.json"
+        if fallback.exists():
+            config_path = fallback
+        else:
+            raise FileNotFoundError(f"Dataset properties not found: {config_path}")
     
     with open(config_path, 'r', encoding='utf-8') as f:
         return json.load(f)
@@ -107,13 +100,14 @@ def compute_windows(min_series_length: int, prediction_length: int) -> int:
 def get_injection_range(
     dataset_name: str,
     term: Union[str, Term] = "short",
-    data_path: str = "datasets",
+    data_path: str = "data/datasets",
+    max_context: int = 8192,
 ) -> dict:
     """
-    计算 Sundial 模型的注错区间位置
+    计算注错区间位置
     
     注错区间定义：
-    - 起始位置：offset = -prediction_length × windows - max_context_sundial
+    - 起始位置：offset = -prediction_length × windows - max_context
     - 终止位置：offset = -prediction_length
     
     Args:
@@ -128,7 +122,7 @@ def get_injection_range(
         - frequency: 数据频率
         - prediction_length: 预测长度
         - windows: 滑动窗口数
-        - max_context: 最大回顾窗口（Sundial 固定为 2880）
+        - max_context: 最大回顾窗口
         - start_index: 在整个数据集中的起始索引（从 0 开始）
         - end_index: 在整个数据集中的结束索引（不包含）
         - injection_length: 注错区间长度
@@ -158,7 +152,7 @@ def get_injection_range(
     prediction_length = compute_prediction_length(freq, term)
     windows = compute_windows(total_length, prediction_length)
     
-    start_offset_from_end = -prediction_length * windows - MAX_CONTEXT_SUNDIAL
+    start_offset_from_end = -prediction_length * windows - max_context
     end_offset_from_end = -prediction_length
     
     start_index = max(0, total_length + start_offset_from_end)
@@ -171,7 +165,7 @@ def get_injection_range(
         "frequency": freq,
         "prediction_length": prediction_length,
         "windows": windows,
-        "max_context": MAX_CONTEXT_SUNDIAL,
+        "max_context": max_context,
         "start_index": start_index,
         "end_index": end_index,
         "injection_length": injection_length,
@@ -190,7 +184,7 @@ def print_injection_range(result: dict) -> None:
     print(f"\n评估参数:")
     print(f"  Prediction Length: {result['prediction_length']}")
     print(f"  Windows: {result['windows']}")
-    print(f"  Max Context (Sundial): {result['max_context']}")
+    print(f"  Max Context: {result['max_context']}")
     print(f"\n注错区间位置:")
     print(f"  Start Index: {result['start_index']} (从 0 开始)")
     print(f"  End Index: {result['end_index']} (不包含)")
@@ -210,7 +204,7 @@ if __name__ == "__main__":
     import argparse
     
     parser = argparse.ArgumentParser(
-        description="计算 Sundial 模型的注错区间位置"
+        description="计算注错区间位置"
     )
     parser.add_argument(
         "--dataset",
@@ -228,8 +222,14 @@ if __name__ == "__main__":
     parser.add_argument(
         "--data_path",
         type=str,
-        default="datasets",
-        help="数据集目录路径（默认：datasets）"
+        default="data/datasets",
+        help="数据集目录路径（默认：data/datasets）"
+    )
+    parser.add_argument(
+        "--max_context",
+        type=int,
+        default=8192,
+        help="最大回顾窗口长度（默认：8192）",
     )
     
     args = parser.parse_args()
@@ -238,6 +238,7 @@ if __name__ == "__main__":
         dataset_name=args.dataset,
         term=args.term,
         data_path=args.data_path,
+        max_context=args.max_context,
     )
     
     print_injection_range(result)

@@ -1,7 +1,7 @@
 """
 缺失率检测工具
 
-用于检测数据集中非时序列特征列的缺失率
+用于检测数据集中非时序列特征列（排除 item_id）的缺失率
 支持全数据集检测或指定范围检测
 """
 
@@ -16,7 +16,7 @@ def check_missing_ratio(
     end_index: Optional[int] = None,
 ) -> Dict:
     """
-    检测数据集中非时序列特征列的缺失率
+    检测数据集中非时序列特征列（排除 item_id）的缺失率
     
     Args:
         dataset_path: 数据集 CSV 文件路径
@@ -36,9 +36,9 @@ def check_missing_ratio(
     # 读取数据
     df = pd.read_csv(dataset_path)
     
-    # 识别时间列和非时序列特征列
-    time_cols = ['date', 'time', 'timestamp']
-    feature_cols = [col for col in df.columns if col not in time_cols]
+    # 识别需要排除的列（时间列 + 标识列）
+    excluded_cols = {'date', 'time', 'timestamp', 'item_id'}
+    feature_cols = [col for col in df.columns if col.lower() not in excluded_cols]
     
     # 确定检测范围
     if start_index is None:
