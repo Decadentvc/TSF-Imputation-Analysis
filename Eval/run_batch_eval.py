@@ -14,13 +14,13 @@ python Eval/run_batch_eval.py \
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 from typing import Iterable, List, Optional
 
 from run_eval import (
     find_clean_dataset_path,
     generate_eval_dataset_paths,
-    get_allowed_terms,
     run_single_evaluation,
 )
 
@@ -85,6 +85,24 @@ def _default_impute_result_dir(model: str) -> Path:
     return Path("results") / model.lower() / "impute"
 
 
+def _get_allowed_terms_from_properties(
+    dataset_name: str,
+    properties_path: str,
+) -> List[str]:
+    props_path = Path(properties_path)
+    if not props_path.exists():
+        raise FileNotFoundError(f"Dataset properties not found: {props_path}")
+
+    with open(props_path, "r", encoding="utf-8") as f:
+        properties = json.load(f)
+
+    if dataset_name not in properties:
+        raise ValueError(f"Dataset '{dataset_name}' not found in properties")
+
+    term_type = properties[dataset_name].get("term", "med_long")
+    return ["short"] if term_type == "short" else ["short", "medium", "long"]
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Batch evaluate one model with skip-existing support"
@@ -99,7 +117,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--model_name", type=str, default=None, help="Model checkpoint")
 
-    parser.add_argument("--dataset", type=str, required=True, help="Dataset name")
+    parser.add_argument(
+        "--dataset",
+        type=str,
+        default=None,
+        help="Dataset name. If omitted, use all datasets under base_data_dir/ori",
+    )
     parser.add_argument("--method", type=str, default="BM", choices=["BM"])
     parser.add_argument("--block_length", type=int, default=None)
 
@@ -153,18 +176,44 @@ def main() -> None:
     parser = _build_parser()
     args = parser.parse_args()
 
-    allowed_terms = get_allowed_terms(args.dataset, args.properties_path)
     user_terms = _split_multi_values(args.terms)
-    if user_terms is None:
-        terms = allowed_terms
+    normalized_terms = _dedupe_lower(user_terms) if user_terms else None
+
+    if args.dataset:
+        datasets = [args.dataset]
     else:
-        normalized_terms = _dedupe_lower(user_terms)
-        invalid_terms = [t for t in normalized_terms if t not in allowed_terms]
-        if invalid_terms:
-            raise ValueError(
-                f"Invalid terms for {args.dataset}: {invalid_terms}, allowed: {allowed_terms}"
-            )
-        terms = normalized_terms
+        ori_dir = Path(args.base_data_dir) / "ori"
+        if not ori_dir.exists():
+            raise FileNotFoundError(f"ori directory not found: {ori_dir}")
+        datasets = sorted({p.stem for p in ori_dir.glob("*.csv")})
+        if not datasets:
+            raise ValueError(f"No datasets found under: {ori_dir}")
+
+    dataset_terms = {}
+    for dataset in datasets:
+        allowed_terms = _get_allowed_terms_from_properties(dataset, args.properties_path)
+        if normalized_terms is None:
+            terms = allowed_terms
+        else:
+            terms = [t for t in normalized_terms if t in allowed_terms]
+            invalid_terms = [t for t in normalized_terms if t not in allowed_terms]
+            if args.dataset and invalid_terms:
+                raise ValueError(
+                    f"Invalid terms for {dataset}: {invalid_terms}, allowed: {allowed_terms}"
+                )
+            if (not args.dataset) and invalid_terms:
+                print(
+                    f"⚠ Dataset {dataset}: ignored unsupported terms {invalid_terms}, "
+                    f"allowed: {allowed_terms}"
+                )
+
+        if not terms:
+            print(f"⚠ Dataset {dataset}: no matched terms, skip dataset")
+            continue
+        dataset_terms[dataset] = terms
+
+    if not dataset_terms:
+        raise ValueError("No valid dataset-term combinations to run")
 
     imputation_methods = _split_multi_values(args.imputation_methods)
     if not imputation_methods:
@@ -176,21 +225,6 @@ def main() -> None:
 
     missing_ratios = _parse_missing_ratios(args.missing_ratios)
 
-    eval_paths_with_terms = generate_eval_dataset_paths(
-        dataset_name=args.dataset,
-        method=args.method,
-        missing_ratios=missing_ratios,
-        base_data_dir=args.base_data_dir,
-        block_length=args.block_length,
-        properties_path=args.properties_path,
-    )
-    eval_paths_with_terms = [
-        (eval_path, term)
-        for eval_path, term in eval_paths_with_terms
-        if term in terms
-    ]
-
-    clean_data_path = find_clean_dataset_path(args.dataset, args.base_data_dir)
     output_dir = Path(args.output_dir) if args.output_dir else _default_impute_result_dir(args.model)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -203,52 +237,69 @@ def main() -> None:
     print("Batch Evaluation (skip existing enabled)")
     print("=" * 80)
     print(f"Model: {args.model}")
-    print(f"Dataset: {args.dataset}")
-    print(f"Terms: {terms}")
+    print(f"Datasets: {list(dataset_terms.keys())}")
+    print(f"Terms (requested): {normalized_terms if normalized_terms else 'auto by dataset'}")
     print(f"Imputation methods: {imputation_methods}")
     print(f"Missing ratios: {missing_ratios if missing_ratios else 'default from run_eval.py'}")
     print(f"Output dir: {output_dir}")
 
-    for eval_path, term in eval_paths_with_terms:
-        eval_file = Path(eval_path)
-        if not eval_file.exists():
-            print(f"⚠ Missing eval dataset, skip file: {eval_path}")
-            continue
+    for dataset, terms in dataset_terms.items():
+        print(f"\n--- Dataset: {dataset} | terms={terms} ---")
+        clean_data_path = find_clean_dataset_path(dataset, args.base_data_dir)
+        eval_paths_with_terms = generate_eval_dataset_paths(
+            dataset_name=dataset,
+            method=args.method,
+            missing_ratios=missing_ratios,
+            base_data_dir=args.base_data_dir,
+            block_length=args.block_length,
+            properties_path=args.properties_path,
+        )
+        eval_paths_with_terms = [
+            (eval_path, term)
+            for eval_path, term in eval_paths_with_terms
+            if term in terms
+        ]
 
-        eval_name = eval_file.stem
-        for method in imputation_methods:
-            total += 1
-            result_path = output_dir / f"{method}_{eval_name}_{term}_results.csv"
-            if result_path.exists() and not args.force:
-                skipped += 1
-                print(f"✓ Skip existing result: {result_path}")
+        for eval_path, term in eval_paths_with_terms:
+            eval_file = Path(eval_path)
+            if not eval_file.exists():
+                print(f"⚠ Missing eval dataset, skip file: {eval_path}")
                 continue
 
-            print(f"\n▶ Running: {eval_name} | term={term} | impute={method}")
-            try:
-                run_single_evaluation(
-                    model=args.model,
-                    model_name=args.model_name,
-                    eval_data_path=eval_path,
-                    clean_data_path=clean_data_path,
-                    term=term,
-                    base_data_dir=args.base_data_dir,
-                    properties_path=args.properties_path,
-                    output_dir=str(output_dir),
-                    prediction_length=args.prediction_length,
-                    num_samples=args.num_samples,
-                    batch_size=args.batch_size,
-                    device=args.device,
-                    imputation_method=method,
-                    imputed_data_dir=args.imputed_data_dir,
-                    intermediate_dir=args.intermediate_dir,
-                    predict_batches_jointly=args.predict_batches_jointly,
-                    torch_dtype=args.torch_dtype,
-                )
-                succeeded += 1
-            except Exception as exc:
-                failed += 1
-                print(f"✗ Failed: {eval_name} / {method} -> {exc}")
+            eval_name = eval_file.stem
+            for method in imputation_methods:
+                total += 1
+                result_path = output_dir / f"{method}_{eval_name}_{term}_results.csv"
+                if result_path.exists() and not args.force:
+                    skipped += 1
+                    print(f"✓ Skip existing result: {result_path}")
+                    continue
+
+                print(f"\n▶ Running: {eval_name} | term={term} | impute={method}")
+                try:
+                    run_single_evaluation(
+                        model=args.model,
+                        model_name=args.model_name,
+                        eval_data_path=eval_path,
+                        clean_data_path=clean_data_path,
+                        term=term,
+                        base_data_dir=args.base_data_dir,
+                        properties_path=args.properties_path,
+                        output_dir=str(output_dir),
+                        prediction_length=args.prediction_length,
+                        num_samples=args.num_samples,
+                        batch_size=args.batch_size,
+                        device=args.device,
+                        imputation_method=method,
+                        imputed_data_dir=args.imputed_data_dir,
+                        intermediate_dir=args.intermediate_dir,
+                        predict_batches_jointly=args.predict_batches_jointly,
+                        torch_dtype=args.torch_dtype,
+                    )
+                    succeeded += 1
+                except Exception as exc:
+                    failed += 1
+                    print(f"✗ Failed: {eval_name} / {method} -> {exc}")
 
     print("\n" + "=" * 80)
     print("Done")
