@@ -518,7 +518,15 @@ def _build_parser() -> argparse.ArgumentParser:
             "--model",
             type=str,
             default="sundial",
-            choices=["sundial", "chronos2", "timesfm2p5"],
+            choices=[
+                "sundial",
+                "chronos2",
+                "timesfm2p5",
+                "kairos23m",
+                "kairos50m",
+                "timesfm2p0",
+                "visiontspp",
+            ],
         )
         p.add_argument("--model_name", type=str, default=None)
         p.add_argument("--base_data_dir", type=str, default="data/datasets")
