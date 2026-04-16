@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Dict
 
 
-def load_dataset_properties(properties_path: str = "datasets/dataset_properties.json") -> dict:
+def load_dataset_properties(properties_path: str = "data/datasets/dataset_properties.json") -> dict:
     """加载数据集属性"""
     props_path = Path(properties_path)
     if not props_path.exists():
@@ -28,7 +28,7 @@ def load_dataset_properties(properties_path: str = "datasets/dataset_properties.
         return json.load(f)
 
 
-def get_period(dataset_name: str, properties_path: str = "datasets/dataset_properties.json") -> int:
+def get_period(dataset_name: str, properties_path: str = "data/datasets/dataset_properties.json") -> int:
     """获取数据集的周期"""
     props = load_dataset_properties(properties_path)
     if dataset_name not in props:

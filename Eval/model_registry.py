@@ -8,10 +8,10 @@ from typing import Any
 
 try:
     # Package-style import: python -m Eval.run_eval
-    from .model_adapters import Chronos2Adapter, SundialAdapter
+    from .model_adapters import Chronos2Adapter, SundialAdapter, TimesFM2p5Adapter
 except ImportError:
     # Script-style import: python Eval/run_eval.py
-    from model_adapters import Chronos2Adapter, SundialAdapter
+    from model_adapters import Chronos2Adapter, SundialAdapter, TimesFM2p5Adapter
 
 
 def build_model_adapter(
@@ -44,4 +44,14 @@ def build_model_adapter(
             torch_dtype=kwargs.get("torch_dtype"),
         )
 
-    raise ValueError(f"Unsupported model: {model}. Available: sundial, chronos2")
+    if model_key == "timesfm2p5":
+        return TimesFM2p5Adapter(
+            prediction_length=prediction_length,
+            batch_size=batch_size,
+            device=device,
+            model_name=model_name or "google/timesfm-2.5-200m-pytorch",
+        )
+
+    raise ValueError(
+        f"Unsupported model: {model}. Available: sundial, chronos2, timesfm2p5"
+    )
