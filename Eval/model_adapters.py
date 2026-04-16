@@ -1,7 +1,3 @@
-"""
-模型适配层：为不同模型提供统一的预测接口。
-"""
-
 from __future__ import annotations
 
 import logging
@@ -9,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional, Protocol
 
 import numpy as np
+import pandas as pd
 import torch
 from gluonts.itertools import batcher
 from gluonts.model.forecast import QuantileForecast, SampleForecast
@@ -18,18 +15,58 @@ from transformers import AutoModelForCausalLM
 
 
 logger = logging.getLogger(__name__)
+DEFAULT_QUANTILE_LEVELS = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
 
 
 class ForecastAdapter(Protocol):
-    """统一预测器接口。"""
-
     def predict(self, test_data_input) -> List[Any]: ...
+
+
+def _extract_input_entry(entry: Any) -> Dict[str, Any]:
+    if isinstance(entry, tuple):
+        return entry[0]
+    return entry
+
+
+def _build_forecastor_input(item: Dict[str, Any]) -> tuple[pd.DataFrame, Optional[str]]:
+    target = np.asarray(item["target"], dtype=np.float64).reshape(-1)
+    if target.shape[0] < 2:
+        raise ValueError("Forecastor adapters require at least 2 history points.")
+
+    start = item["start"]
+    freq = getattr(start, "freqstr", None)
+
+    start_ts = None
+    if hasattr(start, "to_timestamp"):
+        start_ts = start.to_timestamp()
+    elif isinstance(start, pd.Timestamp):
+        start_ts = start
+
+    if start_ts is not None and freq:
+        time_index = pd.date_range(start=start_ts, periods=target.shape[0], freq=freq)
+    else:
+        time_index = pd.RangeIndex(start=0, stop=target.shape[0], step=1)
+
+    return pd.DataFrame({"date": time_index, "target": target}), freq
+
+
+def _to_deterministic_quantile_forecast(
+    point_prediction: np.ndarray,
+    start_date: Any,
+    quantile_levels: Optional[List[float]],
+) -> QuantileForecast:
+    levels = quantile_levels or DEFAULT_QUANTILE_LEVELS
+    pred = np.asarray(point_prediction, dtype=np.float64).reshape(-1)
+    forecast_arrays = np.tile(pred, (len(levels), 1))
+    return QuantileForecast(
+        forecast_arrays=forecast_arrays,
+        forecast_keys=list(map(str, levels)),
+        start_date=start_date,
+    )
 
 
 @dataclass
 class SundialAdapter:
-    """Sundial 预测器适配器。"""
-
     prediction_length: int
     num_samples: int = 100
     batch_size: int = 32
@@ -124,16 +161,12 @@ class SundialAdapter:
         forecasts: List[SampleForecast] = []
         for item, meta in zip(forecast_outputs, input_metadata):
             forecast_start_date = meta["start"] + meta["target_length"]
-            forecasts.append(
-                SampleForecast(samples=item, start_date=forecast_start_date)
-            )
+            forecasts.append(SampleForecast(samples=item, start_date=forecast_start_date))
         return forecasts
 
 
 @dataclass
 class Chronos2Adapter:
-    """Chronos-2 预测器适配器。"""
-
     prediction_length: int
     batch_size: int = 32
     model_name: str = "amazon/chronos-2"
@@ -152,7 +185,7 @@ class Chronos2Adapter:
             ) from exc
 
         if self.quantile_levels is None:
-            self.quantile_levels = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+            self.quantile_levels = DEFAULT_QUANTILE_LEVELS
 
         pipeline_kwargs: Dict[str, Any] = {}
         if self.device:
@@ -211,7 +244,6 @@ class Chronos2Adapter:
                     predict_batches_jointly=self.predict_batches_jointly,
                 )
                 quantiles = torch.stack(quantiles)
-                # [batch, variates, seq_len, quantiles] -> [batch, quantiles, seq_len, variates]
                 quantiles = quantiles.permute(0, 3, 2, 1).cpu().numpy()
                 if input_data and input_data[0]["target"].ndim == 1:
                     quantiles = quantiles.squeeze(-1)
@@ -227,11 +259,7 @@ class Chronos2Adapter:
                 model_batch_size //= 2
 
         forecasts: List[QuantileForecast] = []
-        q_levels: List[float]
-        if self.quantile_levels is None:
-            q_levels = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
-        else:
-            q_levels = self.quantile_levels
+        q_levels = self.quantile_levels or DEFAULT_QUANTILE_LEVELS
         for item, ts in zip(quantiles, input_entries):
             forecast_start_date = ts["start"] + len(ts["target"])
             forecasts.append(
@@ -246,8 +274,6 @@ class Chronos2Adapter:
 
 @dataclass
 class TimesFM2p5Adapter:
-    """TimesFM-2.5 预测器适配器。"""
-
     prediction_length: int
     batch_size: int = 128
     model_name: str = "google/timesfm-2.5-200m-pytorch"
@@ -323,4 +349,224 @@ class TimesFM2p5Adapter:
                     start_date=forecast_start_date,
                 )
             )
+        return forecasts
+
+
+@dataclass
+class Kairos23mAdapter:
+    prediction_length: int
+    num_samples: int = 100
+    batch_size: int = 32
+    device: str = "cpu"
+    model_name: str = "mldi-lab/Kairos_23m"
+    quantile_levels: Optional[List[float]] = None
+
+    def __post_init__(self):
+        try:
+            from .model.kairos_23m_forecastor import kairos_23m_forecastor
+        except ImportError:
+            from model.kairos_23m_forecastor import kairos_23m_forecastor
+
+        self._forecastor = kairos_23m_forecastor
+        if self.quantile_levels is None:
+            self.quantile_levels = DEFAULT_QUANTILE_LEVELS
+        if self.model_name != "mldi-lab/Kairos_23m":
+            logger.warning(
+                "Kairos23mAdapter currently ignores model_name=%s; using forecastor defaults.",
+                self.model_name,
+            )
+
+    def predict(self, test_data_input) -> List[QuantileForecast]:
+        forecasts: List[QuantileForecast] = []
+        input_entries = [_extract_input_entry(x) for x in list(test_data_input)]
+
+        for batch in tqdm(batcher(input_entries, batch_size=self.batch_size)):
+            for item in batch:
+                df_input, freq = _build_forecastor_input(item)
+                output_df = self._forecastor(
+                    dataframe=df_input,
+                    forecast_length=self.prediction_length,
+                    num_samples=self.num_samples,
+                    freq=freq,
+                    device=self.device,
+                )
+                point_prediction = pd.to_numeric(
+                    output_df.iloc[:, -1], errors="coerce"
+                ).to_numpy(dtype=np.float64)
+                if point_prediction.shape[0] < self.prediction_length:
+                    raise RuntimeError(
+                        "Kairos_23m returned fewer points than prediction_length."
+                    )
+                forecasts.append(
+                    _to_deterministic_quantile_forecast(
+                        point_prediction[: self.prediction_length],
+                        item["start"] + len(item["target"]),
+                        self.quantile_levels,
+                    )
+                )
+        return forecasts
+
+
+@dataclass
+class Kairos50mAdapter:
+    prediction_length: int
+    num_samples: int = 100
+    batch_size: int = 32
+    device: str = "cpu"
+    model_name: str = "mldi-lab/Kairos_50m"
+    quantile_levels: Optional[List[float]] = None
+
+    def __post_init__(self):
+        try:
+            from .model.kairos_50m_forecastor import kairos_50m_forecastor
+        except ImportError:
+            from model.kairos_50m_forecastor import kairos_50m_forecastor
+
+        self._forecastor = kairos_50m_forecastor
+        if self.quantile_levels is None:
+            self.quantile_levels = DEFAULT_QUANTILE_LEVELS
+        if self.model_name != "mldi-lab/Kairos_50m":
+            logger.warning(
+                "Kairos50mAdapter currently ignores model_name=%s; using forecastor defaults.",
+                self.model_name,
+            )
+
+    def predict(self, test_data_input) -> List[QuantileForecast]:
+        forecasts: List[QuantileForecast] = []
+        input_entries = [_extract_input_entry(x) for x in list(test_data_input)]
+
+        for batch in tqdm(batcher(input_entries, batch_size=self.batch_size)):
+            for item in batch:
+                df_input, freq = _build_forecastor_input(item)
+                output_df = self._forecastor(
+                    dataframe=df_input,
+                    forecast_length=self.prediction_length,
+                    num_samples=self.num_samples,
+                    freq=freq,
+                    device=self.device,
+                )
+                point_prediction = pd.to_numeric(
+                    output_df.iloc[:, -1], errors="coerce"
+                ).to_numpy(dtype=np.float64)
+                if point_prediction.shape[0] < self.prediction_length:
+                    raise RuntimeError(
+                        "Kairos_50m returned fewer points than prediction_length."
+                    )
+                forecasts.append(
+                    _to_deterministic_quantile_forecast(
+                        point_prediction[: self.prediction_length],
+                        item["start"] + len(item["target"]),
+                        self.quantile_levels,
+                    )
+                )
+        return forecasts
+
+
+@dataclass
+class TimesFM2p0Adapter:
+    prediction_length: int
+    num_samples: int = 100
+    batch_size: int = 32
+    device: str = "cpu"
+    model_name: str = "google/timesfm-2.0-500m-pytorch"
+    quantile_levels: Optional[List[float]] = None
+
+    def __post_init__(self):
+        try:
+            from .model.timesfm_2p0_500m_forecastor import timesfm_2p0_500m_forecastor
+        except ImportError:
+            from model.timesfm_2p0_500m_forecastor import timesfm_2p0_500m_forecastor
+
+        self._forecastor = timesfm_2p0_500m_forecastor
+        if self.quantile_levels is None:
+            self.quantile_levels = DEFAULT_QUANTILE_LEVELS
+        if self.model_name != "google/timesfm-2.0-500m-pytorch":
+            logger.warning(
+                "TimesFM2p0Adapter currently ignores model_name=%s; using forecastor defaults.",
+                self.model_name,
+            )
+
+    def predict(self, test_data_input) -> List[QuantileForecast]:
+        forecasts: List[QuantileForecast] = []
+        input_entries = [_extract_input_entry(x) for x in list(test_data_input)]
+
+        for batch in tqdm(batcher(input_entries, batch_size=self.batch_size)):
+            for item in batch:
+                df_input, freq = _build_forecastor_input(item)
+                output_df = self._forecastor(
+                    dataframe=df_input,
+                    forecast_length=self.prediction_length,
+                    num_samples=self.num_samples,
+                    freq=freq,
+                    device=self.device,
+                )
+                point_prediction = pd.to_numeric(
+                    output_df.iloc[:, -1], errors="coerce"
+                ).to_numpy(dtype=np.float64)
+                if point_prediction.shape[0] < self.prediction_length:
+                    raise RuntimeError(
+                        "TimesFM_2p0_500m returned fewer points than prediction_length."
+                    )
+                forecasts.append(
+                    _to_deterministic_quantile_forecast(
+                        point_prediction[: self.prediction_length],
+                        item["start"] + len(item["target"]),
+                        self.quantile_levels,
+                    )
+                )
+        return forecasts
+
+
+@dataclass
+class VisionTSppAdapter:
+    prediction_length: int
+    num_samples: int = 100
+    batch_size: int = 32
+    device: str = "cpu"
+    model_name: str = "visiontspp-local"
+    quantile_levels: Optional[List[float]] = None
+
+    def __post_init__(self):
+        try:
+            from .model.visiontspp_forecastor import visiontspp_forecastor
+        except ImportError:
+            from model.visiontspp_forecastor import visiontspp_forecastor
+
+        self._forecastor = visiontspp_forecastor
+        if self.quantile_levels is None:
+            self.quantile_levels = DEFAULT_QUANTILE_LEVELS
+        if self.model_name != "visiontspp-local":
+            logger.warning(
+                "VisionTSppAdapter currently ignores model_name=%s; using forecastor defaults.",
+                self.model_name,
+            )
+
+    def predict(self, test_data_input) -> List[QuantileForecast]:
+        forecasts: List[QuantileForecast] = []
+        input_entries = [_extract_input_entry(x) for x in list(test_data_input)]
+
+        for batch in tqdm(batcher(input_entries, batch_size=self.batch_size)):
+            for item in batch:
+                df_input, freq = _build_forecastor_input(item)
+                output_df = self._forecastor(
+                    dataframe=df_input,
+                    forecast_length=self.prediction_length,
+                    num_samples=self.num_samples,
+                    freq=freq,
+                    device=self.device,
+                )
+                point_prediction = pd.to_numeric(
+                    output_df.iloc[:, -1], errors="coerce"
+                ).to_numpy(dtype=np.float64)
+                if point_prediction.shape[0] < self.prediction_length:
+                    raise RuntimeError(
+                        "VisionTSpp returned fewer points than prediction_length."
+                    )
+                forecasts.append(
+                    _to_deterministic_quantile_forecast(
+                        point_prediction[: self.prediction_length],
+                        item["start"] + len(item["target"]),
+                        self.quantile_levels,
+                    )
+                )
         return forecasts

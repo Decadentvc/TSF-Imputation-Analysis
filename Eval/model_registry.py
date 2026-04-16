@@ -8,10 +8,26 @@ from typing import Any
 
 try:
     # Package-style import: python -m Eval.run_eval
-    from .model_adapters import Chronos2Adapter, SundialAdapter, TimesFM2p5Adapter
+    from .model_adapters import (
+        Chronos2Adapter,
+        Kairos23mAdapter,
+        Kairos50mAdapter,
+        SundialAdapter,
+        TimesFM2p0Adapter,
+        TimesFM2p5Adapter,
+        VisionTSppAdapter,
+    )
 except ImportError:
     # Script-style import: python Eval/run_eval.py
-    from model_adapters import Chronos2Adapter, SundialAdapter, TimesFM2p5Adapter
+    from model_adapters import (
+        Chronos2Adapter,
+        Kairos23mAdapter,
+        Kairos50mAdapter,
+        SundialAdapter,
+        TimesFM2p0Adapter,
+        TimesFM2p5Adapter,
+        VisionTSppAdapter,
+    )
 
 
 def build_model_adapter(
@@ -52,6 +68,43 @@ def build_model_adapter(
             model_name=model_name or "google/timesfm-2.5-200m-pytorch",
         )
 
+    if model_key in {"kairos23m", "kairos_23m"}:
+        return Kairos23mAdapter(
+            prediction_length=prediction_length,
+            num_samples=num_samples,
+            batch_size=batch_size,
+            device=device,
+            model_name=model_name or "mldi-lab/Kairos_23m",
+        )
+
+    if model_key in {"kairos50m", "kairos_50m"}:
+        return Kairos50mAdapter(
+            prediction_length=prediction_length,
+            num_samples=num_samples,
+            batch_size=batch_size,
+            device=device,
+            model_name=model_name or "mldi-lab/Kairos_50m",
+        )
+
+    if model_key in {"timesfm2p0", "timesfm_2p0_500m", "timesfm2p0_500m"}:
+        return TimesFM2p0Adapter(
+            prediction_length=prediction_length,
+            num_samples=num_samples,
+            batch_size=batch_size,
+            device=device,
+            model_name=model_name or "google/timesfm-2.0-500m-pytorch",
+        )
+
+    if model_key in {"visiontspp", "visionts++"}:
+        return VisionTSppAdapter(
+            prediction_length=prediction_length,
+            num_samples=num_samples,
+            batch_size=batch_size,
+            device=device,
+            model_name=model_name or "visiontspp-local",
+        )
+
     raise ValueError(
-        f"Unsupported model: {model}. Available: sundial, chronos2, timesfm2p5"
+        f"Unsupported model: {model}. Available: sundial, chronos2, timesfm2p5, "
+        f"kairos23m, kairos50m, timesfm2p0, visiontspp"
     )
