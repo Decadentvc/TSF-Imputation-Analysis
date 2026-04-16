@@ -1,0 +1,56 @@
+{
+  "model": "sundial",
+  "dataset": "Coastal_T_S_20T",
+  "method": "BM",
+  "ratio": 0.1,
+  "term": "long",
+  "imputation_method": "forward",
+  "n_windows": 7,
+  "period": 72,
+  "inject_range": {
+    "dataset_name": "Coastal_T_S_20T",
+    "term": "long",
+    "frequency": "20T",
+    "prediction_length": 720,
+    "windows": 7,
+    "max_context": 2880,
+    "start_index": 278,
+    "end_index": 7478,
+    "injection_length": 7200,
+    "total_length": 8198
+  },
+  "summary": {
+    "mean": {
+      "trend_strength": 0.9949967909106807,
+      "trend_linearity": 0.0009177924729507515,
+      "seasonal_strength": 0.5090221113194152,
+      "seasonal_correlation": 0.45106519760128144,
+      "residual_autocorr_lag1": 0.9227223387921215,
+      "spectral_entropy": 2653.2680458526092
+    },
+    "std": {
+      "trend_strength": 0.004533791456983468,
+      "trend_linearity": 0.0002934102829979011,
+      "seasonal_strength": 0.06253242462403702,
+      "seasonal_correlation": 0.05012242609380978,
+      "residual_autocorr_lag1": 0.01374985748314728,
+      "spectral_entropy": 784.7977383121089
+    },
+    "min": {
+      "trend_strength": 0.9875265844149644,
+      "trend_linearity": 0.0004911153758325709,
+      "seasonal_strength": 0.43950473938990753,
+      "seasonal_correlation": 0.36515434393792146,
+      "residual_autocorr_lag1": 0.9045872498629255,
+      "spectral_entropy": 1302.8579790501142
+    },
+    "max": {
+      "trend_strength": 0.9986513286234425,
+      "trend_linearity": 0.0012741530555426409,
+      "seasonal_strength": 0.6195981227503022,
+      "seasonal_correlation": 0.5130205619976462,
+      "residual_autocorr_lag1": 0.9375394492762696,
+      "spectral_entropy": 3392.76303900266
+    }
+  }
+}

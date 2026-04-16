@@ -114,10 +114,12 @@ def analyze_single_window(
         "spectral_entropy": [],
     }
     
+    skipped_short = 0
     for col in value_cols:
         series = data[col].dropna().values
         
         if len(series) < 2 * period:
+            skipped_short += 1
             continue
         
         try:
@@ -139,8 +141,10 @@ def analyze_single_window(
     if not all_metrics["trend_strength"]:
         return {
             "success": False,
-            "error": "No valid series for STL decomposition",
+            "error": f"No valid series for STL decomposition (need >= {2*period} points, series too short: {skipped_short} skipped)",
             "window_idx": window_idx,
+            "required_length": 2 * period,
+            "skipped_series": skipped_short,
         }
     
     avg_metrics = {key: float(np.mean(values)) for key, values in all_metrics.items()}
@@ -218,9 +222,10 @@ def analyze_prediction_windows(
     if not window_results:
         return {
             "success": False,
-            "error": "No valid windows analyzed",
+            "error": f"No valid windows analyzed (need >= {2*period} points for STL decomposition, prediction length may be too short)",
             "dir_info": dir_info,
             "imputation_method": imputation_method,
+            "required_length": 2 * period,
         }
     
     all_metrics = {
@@ -364,8 +369,9 @@ def analyze_history_windows(
     if not window_results:
         return {
             "success": False,
-            "error": "No valid windows analyzed",
+            "error": f"No valid windows analyzed (need >= {2*period} points per series for STL decomposition)",
             "inject_range": inject_range,
+            "required_length": 2 * period,
         }
     
     all_metrics = {
@@ -789,11 +795,13 @@ def main() -> None:
     skipped_pred = 0
     failed_pred = 0
     succeeded_pred = 0
+    insufficient_pred = 0
     
     total_hist = 0
     skipped_hist = 0
     failed_hist = 0
     succeeded_hist = 0
+    insufficient_hist = 0
     
     all_prediction_results = []
     all_history_results = []
@@ -878,8 +886,13 @@ def main() -> None:
                         succeeded_pred += 1
                         print(f"  ✓ Saved: {output_path}")
                     else:
-                        failed_pred += 1
-                        print(f"  ✗ Failed: {pred_dir} - {result.get('error', 'Unknown error')}")
+                        error_msg = result.get('error', 'Unknown error')
+                        if 'series too short' in error_msg.lower() or 'need >=' in error_msg.lower():
+                            insufficient_pred += 1
+                            print(f"  ⊘ Insufficient data: {pred_dir} - {error_msg}")
+                        else:
+                            failed_pred += 1
+                            print(f"  ✗ Failed: {pred_dir} - {error_msg}")
                         
                 except Exception as e:
                     failed_pred += 1
@@ -923,8 +936,12 @@ def main() -> None:
                                 succeeded_hist += 1
                                 print(f"  ✓ Saved: {output_path}")
                             else:
-                                failed_hist += 1
-                                print(f"  ✗ Failed: {dataset} clean {term} - {result.get('error', 'Unknown error')}")
+                                error_msg = result.get('error', 'Unknown error')
+                                if 'series too short' in error_msg.lower() or 'need >=' in error_msg.lower():
+                                    insufficient_hist += 1
+                                else:
+                                    failed_hist += 1
+                                    print(f"  ✗ Failed: {dataset} clean {term} - {error_msg}")
                                 
                         except Exception as e:
                             failed_hist += 1
@@ -965,8 +982,12 @@ def main() -> None:
                                     succeeded_hist += 1
                                     print(f"  ✓ Saved: {output_path}")
                                 else:
-                                    failed_hist += 1
-                                    print(f"  ✗ Failed: {dataset} {method} {ratio} {term} {impute_method} - {result.get('error', 'Unknown error')}")
+                                    error_msg = result.get('error', 'Unknown error')
+                                    if 'series too short' in error_msg.lower() or 'need >=' in error_msg.lower():
+                                        insufficient_hist += 1
+                                    else:
+                                        failed_hist += 1
+                                        print(f"  ✗ Failed: {dataset} {method} {ratio} {term} {impute_method} - {error_msg}")
                                     
                             except Exception as e:
                                 failed_hist += 1
@@ -999,16 +1020,18 @@ def main() -> None:
     print("=" * 80)
     if do_prediction:
         print(f"Prediction Analysis:")
-        print(f"  Total:    {total_pred}")
-        print(f"  Succeeded:{succeeded_pred}")
-        print(f"  Skipped:  {skipped_pred}")
-        print(f"  Failed:   {failed_pred}")
+        print(f"  Total:       {total_pred}")
+        print(f"  Succeeded:   {succeeded_pred}")
+        print(f"  Skipped:     {skipped_pred}")
+        print(f"  Insufficient:{insufficient_pred} (data too short for STL)")
+        print(f"  Failed:      {failed_pred}")
     if do_history:
         print(f"History Analysis:")
-        print(f"  Total:    {total_hist}")
-        print(f"  Succeeded:{succeeded_hist}")
-        print(f"  Skipped:  {skipped_hist}")
-        print(f"  Failed:   {failed_hist}")
+        print(f"  Total:       {total_hist}")
+        print(f"  Succeeded:   {succeeded_hist}")
+        print(f"  Skipped:     {skipped_hist}")
+        print(f"  Insufficient:{insufficient_hist} (data too short for STL)")
+        print(f"  Failed:      {failed_hist}")
 
 
 if __name__ == "__main__":
