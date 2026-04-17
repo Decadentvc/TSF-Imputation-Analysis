@@ -161,7 +161,9 @@ class SundialAdapter:
         forecasts: List[SampleForecast] = []
         for item, meta in zip(forecast_outputs, input_metadata):
             forecast_start_date = meta["start"] + meta["target_length"]
-            forecasts.append(SampleForecast(samples=item, start_date=forecast_start_date))
+            forecasts.append(
+                SampleForecast(samples=item, start_date=forecast_start_date)
+            )
         return forecasts
 
 
@@ -279,9 +281,11 @@ class TimesFM2p5Adapter:
     model_name: str = "google/timesfm-2.5-200m-pytorch"
     device: str = "cpu"
     max_context: int = 4096
+    per_core_batch_size: int = 128
 
     def __post_init__(self):
         try:
+            import timesfm as timesfm_pkg
             from timesfm import configs
             from timesfm.timesfm_2p5 import timesfm_2p5_torch
         except ImportError as exc:  # pragma: no cover
@@ -290,17 +294,26 @@ class TimesFM2p5Adapter:
             ) from exc
 
         self.configs = configs
-        self.tfm = timesfm_2p5_torch.TimesFM_2p5_200M_torch()
         try:
-            self.tfm.load_checkpoint(repo_id=self.model_name)
-        except TypeError:
-            # 兼容旧版 timesfm：load_checkpoint 不接收 repo_id
-            self.tfm.load_checkpoint()
-            if self.model_name != "google/timesfm-2.5-200m-pytorch":
-                logger.warning(
-                    "Current timesfm version ignores model_name=%s in load_checkpoint().",
-                    self.model_name,
-                )
+            self.tfm = timesfm_pkg.TimesFM_2p5_200M_torch.from_pretrained(
+                self.model_name,
+                torch_compile=True,
+            )
+        except Exception as pretrained_exc:
+            logger.warning(
+                "TimesFM from_pretrained failed, fallback to load_checkpoint: %s",
+                pretrained_exc,
+            )
+            self.tfm = timesfm_2p5_torch.TimesFM_2p5_200M_torch()
+            try:
+                self.tfm.load_checkpoint(repo_id=self.model_name)
+            except TypeError:
+                self.tfm.load_checkpoint()
+                if self.model_name != "google/timesfm-2.5-200m-pytorch":
+                    logger.warning(
+                        "Current timesfm version ignores model_name=%s in load_checkpoint().",
+                        self.model_name,
+                    )
         self.quantiles = list(np.arange(1, 10) / 10.0)
 
     @staticmethod
@@ -311,34 +324,38 @@ class TimesFM2p5Adapter:
 
     def predict(self, test_data_input) -> List[QuantileForecast]:
         input_entries = [self._extract_input_entry(x) for x in list(test_data_input)]
+        if not input_entries:
+            return []
+
+        global_max_context = max(len(entry["target"]) for entry in input_entries)
+        patch_size = getattr(getattr(self.tfm, "model", None), "p", None)
+        if isinstance(patch_size, int) and patch_size > 0:
+            global_max_context = (
+                (global_max_context + patch_size - 1) // patch_size
+            ) * patch_size
+
+        self.tfm.compile(
+            forecast_config=self.configs.ForecastConfig(
+                max_context=min(self.max_context, global_max_context),
+                max_horizon=self.prediction_length,
+                infer_is_positive=True,
+                use_continuous_quantile_head=True,
+                fix_quantile_crossing=True,
+                force_flip_invariance=True,
+                return_backcast=False,
+                normalize_inputs=True,
+                per_core_batch_size=self.per_core_batch_size,
+            )
+        )
+
         forecast_outputs = []
 
         for batch in tqdm(batcher(input_entries, batch_size=self.batch_size)):
             context = []
-            max_context = 0
 
             for entry in batch:
                 arr = np.array(entry["target"])
-                if max_context < arr.shape[0]:
-                    max_context = arr.shape[0]
                 context.append(arr)
-
-            max_context = (
-                (max_context + self.tfm.model.p - 1) // self.tfm.model.p
-            ) * self.tfm.model.p
-            self.tfm.compile(
-                forecast_config=self.configs.ForecastConfig(
-                    max_context=min(self.max_context, max_context),
-                    max_horizon=1024,
-                    infer_is_positive=True,
-                    use_continuous_quantile_head=True,
-                    fix_quantile_crossing=True,
-                    force_flip_invariance=True,
-                    return_backcast=False,
-                    normalize_inputs=True,
-                    per_core_batch_size=self.batch_size,
-                )
-            )
 
             _, full_preds = self.tfm.forecast(
                 horizon=self.prediction_length,
