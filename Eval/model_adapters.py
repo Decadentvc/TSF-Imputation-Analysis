@@ -290,8 +290,17 @@ class TimesFM2p5Adapter:
             ) from exc
 
         self.configs = configs
-        self.tfm = timesfm_2p5_torch.TimesFM_2p5_200M_torch(device=self.device)
-        self.tfm.load_checkpoint(repo_id=self.model_name)
+        self.tfm = timesfm_2p5_torch.TimesFM_2p5_200M_torch()
+        try:
+            self.tfm.load_checkpoint(repo_id=self.model_name)
+        except TypeError:
+            # 兼容旧版 timesfm：load_checkpoint 不接收 repo_id
+            self.tfm.load_checkpoint()
+            if self.model_name != "google/timesfm-2.5-200m-pytorch":
+                logger.warning(
+                    "Current timesfm version ignores model_name=%s in load_checkpoint().",
+                    self.model_name,
+                )
         self.quantiles = list(np.arange(1, 10) / 10.0)
 
     @staticmethod
