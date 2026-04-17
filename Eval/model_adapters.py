@@ -327,13 +327,23 @@ class TimesFM2p5Adapter:
         if not input_entries:
             return []
 
-        global_max_context = max(len(entry["target"]) for entry in input_entries)
+        contexts: List[np.ndarray] = []
+        global_max_context = 0
+        for entry in input_entries:
+            arr = np.asarray(entry["target"], dtype=np.float32)
+            if self.max_context > 0 and arr.shape[0] > self.max_context:
+                arr = arr[-self.max_context :]
+            contexts.append(arr)
+            if arr.shape[0] > global_max_context:
+                global_max_context = arr.shape[0]
+
         patch_size = getattr(getattr(self.tfm, "model", None), "p", None)
         if isinstance(patch_size, int) and patch_size > 0:
             global_max_context = (
                 (global_max_context + patch_size - 1) // patch_size
             ) * patch_size
 
+        per_core_batch_size = max(1, min(self.per_core_batch_size, self.batch_size))
         self.tfm.compile(
             forecast_config=self.configs.ForecastConfig(
                 max_context=min(self.max_context, global_max_context),
@@ -344,18 +354,14 @@ class TimesFM2p5Adapter:
                 force_flip_invariance=True,
                 return_backcast=False,
                 normalize_inputs=True,
-                per_core_batch_size=self.per_core_batch_size,
+                per_core_batch_size=per_core_batch_size,
             )
         )
 
         forecast_outputs = []
 
-        for batch in tqdm(batcher(input_entries, batch_size=self.batch_size)):
-            context = []
-
-            for entry in batch:
-                arr = np.array(entry["target"])
-                context.append(arr)
+        for batch_context in tqdm(batcher(contexts, batch_size=self.batch_size)):
+            context = list(batch_context)
 
             _, full_preds = self.tfm.forecast(
                 horizon=self.prediction_length,

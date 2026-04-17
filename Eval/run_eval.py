@@ -231,6 +231,13 @@ def _default_result_subdir(model: str, mode: str) -> str:
     )
 
 
+def _build_impute_result_filename(method_name: str, eval_name: str, term: str) -> str:
+    term_norm = term.lower()
+    if eval_name.lower().endswith(f"_{term_norm}"):
+        return f"{method_name.lower()}_{eval_name}_results.csv"
+    return f"{method_name.lower()}_{eval_name}_{term_norm}_results.csv"
+
+
 def run_single_evaluation(
     model: str,
     model_name: Optional[str],
@@ -317,7 +324,7 @@ def run_single_evaluation(
     out_dir = output_dir or _default_result_subdir(model, mode)
     if mode == "impute":
         method_name = imputation_method if imputation_method is not None else "none"
-        filename = f"{method_name.lower()}_{eval_name}_{term}_results.csv"
+        filename = _build_impute_result_filename(method_name, eval_name, term)
     else:
         filename = f"{eval_name}_{term}_results.csv"
 
@@ -427,7 +434,7 @@ def batch_evaluate(
 
                 eval_name = Path(eval_path).stem
                 out_dir = output_dir or _default_result_subdir(model, "impute")
-                filename = f"{impute_method}_{eval_name}_{term}_results.csv"
+                filename = _build_impute_result_filename(impute_method, eval_name, term)
                 save_results_to_csv(results, str(Path(out_dir) / filename))
 
                 save_intermediate_predictions(

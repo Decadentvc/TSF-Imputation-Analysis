@@ -14,11 +14,13 @@ python Eval/run_batch_eval.py \
 from __future__ import annotations
 
 import argparse
+import gc
 import json
 from pathlib import Path
 from typing import Iterable, List, Optional
 
 from run_eval import (
+    _build_impute_result_filename,
     evaluate_clean,
     find_clean_dataset_path,
     generate_eval_dataset_paths,
@@ -84,6 +86,19 @@ def _dedupe_lower(values: Iterable[str]) -> List[str]:
 
 def _default_impute_result_dir(model: str) -> Path:
     return Path("results") / model.lower() / "impute"
+
+
+def _cleanup_runtime(device: str) -> None:
+    gc.collect()
+    try:
+        import torch
+
+        if device.lower().startswith("cuda") and torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
+    except Exception:
+        # Cleanup is best-effort and should never fail a run.
+        pass
 
 
 def _get_allowed_terms_from_properties(
@@ -315,6 +330,8 @@ def main() -> None:
                 except Exception as exc:
                     failed += 1
                     print(f"✗ Failed clean: {dataset} / {term} -> {exc}")
+                finally:
+                    _cleanup_runtime(args.device)
 
         if not run_impute:
             continue
@@ -342,7 +359,8 @@ def main() -> None:
             eval_name = eval_file.stem
             for method in imputation_methods:
                 total += 1
-                result_path = output_dir / f"{method}_{eval_name}_{term}_results.csv"
+                result_filename = _build_impute_result_filename(method, eval_name, term)
+                result_path = output_dir / result_filename
                 if result_path.exists() and not args.force:
                     skipped += 1
                     print(f"✓ Skip existing result: {result_path}")
@@ -373,6 +391,8 @@ def main() -> None:
                 except Exception as exc:
                     failed += 1
                     print(f"✗ Failed: {eval_name} / {method} -> {exc}")
+                finally:
+                    _cleanup_runtime(args.device)
 
     print("\n" + "=" * 80)
     print("Done")
