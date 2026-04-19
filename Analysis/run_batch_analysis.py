@@ -766,7 +766,8 @@ def main() -> None:
     user_terms = split_multi_values(args.terms)
     normalized_terms = dedupe_lower(user_terms) if user_terms else None
     
-    imputation_methods = dedupe_lower(args.imputation_methods) if args.imputation_methods else []
+    raw_imputation_methods = split_multi_values(args.imputation_methods)
+    imputation_methods = dedupe_lower(raw_imputation_methods) if raw_imputation_methods else []
     
     intermediate_dir = Path(args.intermediate_dir)
     output_dir = Path(args.output_dir)

@@ -1,0 +1,56 @@
+{
+  "model": "timesfm2p5",
+  "dataset": "current_velocity_5T",
+  "method": "BM",
+  "ratio": 0.1,
+  "term": "long",
+  "imputation_method": "mean",
+  "n_windows": 20,
+  "period": 288,
+  "inject_range": {
+    "dataset_name": "current_velocity_5T",
+    "term": "long",
+    "frequency": "5T",
+    "prediction_length": 720,
+    "windows": 20,
+    "max_context": 4096,
+    "start_index": 7990,
+    "end_index": 25766,
+    "injection_length": 17776,
+    "total_length": 26486
+  },
+  "summary": {
+    "mean": {
+      "trend_strength": 0.20855873810242004,
+      "trend_linearity": -1.5351555808512539e-06,
+      "seasonal_strength": 0.9090888199694543,
+      "seasonal_correlation": 0.08173242277415024,
+      "residual_autocorr_lag1": 0.9562981872714257,
+      "spectral_entropy": 1304.665889821264
+    },
+    "std": {
+      "trend_strength": 0.08967898640983026,
+      "trend_linearity": 2.7801199172349353e-05,
+      "seasonal_strength": 0.03184502930798133,
+      "seasonal_correlation": 0.028005001291537192,
+      "residual_autocorr_lag1": 0.009413926057745214,
+      "spectral_entropy": 616.1561725720975
+    },
+    "min": {
+      "trend_strength": 0.05871911946093544,
+      "trend_linearity": -5.968667237521577e-05,
+      "seasonal_strength": 0.8585131531975023,
+      "seasonal_correlation": 0.04353763992346421,
+      "residual_autocorr_lag1": 0.9415820074530042,
+      "spectral_entropy": -266.9848887161228
+    },
+    "max": {
+      "trend_strength": 0.47493921844021825,
+      "trend_linearity": 4.8395781403475094e-05,
+      "seasonal_strength": 0.970147980127661,
+      "seasonal_correlation": 0.14883354339033814,
+      "residual_autocorr_lag1": 0.9749136509126605,
+      "spectral_entropy": 2427.876244093752
+    }
+  }
+}
