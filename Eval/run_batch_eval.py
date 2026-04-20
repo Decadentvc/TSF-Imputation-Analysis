@@ -19,6 +19,8 @@ import json
 from pathlib import Path
 from typing import Iterable, List, Optional
 
+from tqdm import tqdm
+
 from run_eval import (
     _build_impute_result_filename,
     evaluate_clean,
@@ -295,43 +297,19 @@ def main() -> None:
     if run_clean:
         print(f"Clean output dir: {clean_output_dir}")
 
+    # 预构建任务列表，便于统一显示进度
+    tasks: List[dict] = []
     for dataset, terms in dataset_terms.items():
-        print(f"\n--- Dataset: {dataset} | terms={terms} ---")
         clean_data_path = find_clean_dataset_path(dataset, args.base_data_dir)
 
         if run_clean:
             for term in terms:
-                total += 1
-                clean_result_path = clean_output_dir / f"{dataset}_clean_{term}_results.csv"
-                if clean_result_path.exists() and not args.force:
-                    skipped += 1
-                    print(f"✓ Skip existing clean result: {clean_result_path}")
-                    continue
-
-                print(f"\n▶ Running clean: {dataset} | term={term}")
-                try:
-                    evaluate_clean(
-                        model=args.model,
-                        model_name=args.model_name,
-                        dataset_name=dataset,
-                        term=term,
-                        base_data_dir=args.base_data_dir,
-                        properties_path=args.properties_path,
-                        output_dir=str(clean_output_dir),
-                        prediction_length=args.prediction_length,
-                        num_samples=args.num_samples,
-                        batch_size=args.batch_size,
-                        device=args.device,
-                        intermediate_dir=args.intermediate_dir,
-                        predict_batches_jointly=args.predict_batches_jointly,
-                        torch_dtype=args.torch_dtype,
-                    )
-                    succeeded += 1
-                except Exception as exc:
-                    failed += 1
-                    print(f"✗ Failed clean: {dataset} / {term} -> {exc}")
-                finally:
-                    _cleanup_runtime(args.device)
+                tasks.append({
+                    "kind": "clean",
+                    "dataset": dataset,
+                    "term": term,
+                    "clean_data_path": clean_data_path,
+                })
 
         if not run_impute:
             continue
@@ -353,46 +331,96 @@ def main() -> None:
         for eval_path, term in eval_paths_with_terms:
             eval_file = Path(eval_path)
             if not eval_file.exists():
-                print(f"⚠ Missing eval dataset, skip file: {eval_path}")
+                tqdm.write(f"⚠ Missing eval dataset, skip file: {eval_path}")
+                continue
+            for method in imputation_methods:
+                tasks.append({
+                    "kind": "impute",
+                    "dataset": dataset,
+                    "term": term,
+                    "eval_path": eval_path,
+                    "eval_name": eval_file.stem,
+                    "method": method,
+                    "clean_data_path": clean_data_path,
+                })
+
+    total = len(tasks)
+    pbar = tqdm(tasks, total=total, desc="Batch Eval", unit="task", dynamic_ncols=True)
+    for task in pbar:
+        if task["kind"] == "clean":
+            dataset = task["dataset"]
+            term = task["term"]
+            pbar.set_postfix_str(f"clean | {dataset} | {term}")
+            clean_result_path = clean_output_dir / f"{dataset}_clean_{term}_results.csv"
+            if clean_result_path.exists() and not args.force:
+                skipped += 1
+                tqdm.write(f"✓ Skip existing clean result: {clean_result_path}")
                 continue
 
-            eval_name = eval_file.stem
-            for method in imputation_methods:
-                total += 1
-                result_filename = _build_impute_result_filename(method, eval_name, term)
-                result_path = output_dir / result_filename
-                if result_path.exists() and not args.force:
-                    skipped += 1
-                    print(f"✓ Skip existing result: {result_path}")
-                    continue
+            tqdm.write(f"▶ Running clean: {dataset} | term={term}")
+            try:
+                evaluate_clean(
+                    model=args.model,
+                    model_name=args.model_name,
+                    dataset_name=dataset,
+                    term=term,
+                    base_data_dir=args.base_data_dir,
+                    properties_path=args.properties_path,
+                    output_dir=str(clean_output_dir),
+                    prediction_length=args.prediction_length,
+                    num_samples=args.num_samples,
+                    batch_size=args.batch_size,
+                    device=args.device,
+                    intermediate_dir=args.intermediate_dir,
+                    predict_batches_jointly=args.predict_batches_jointly,
+                    torch_dtype=args.torch_dtype,
+                )
+                succeeded += 1
+            except Exception as exc:
+                failed += 1
+                tqdm.write(f"✗ Failed clean: {dataset} / {term} -> {exc}")
+            finally:
+                _cleanup_runtime(args.device)
+        else:
+            eval_name = task["eval_name"]
+            term = task["term"]
+            method = task["method"]
+            pbar.set_postfix_str(f"impute | {eval_name} | {term} | {method}")
+            result_filename = _build_impute_result_filename(method, eval_name, term)
+            result_path = output_dir / result_filename
+            if result_path.exists() and not args.force:
+                skipped += 1
+                tqdm.write(f"✓ Skip existing result: {result_path}")
+                continue
 
-                print(f"\n▶ Running: {eval_name} | term={term} | impute={method}")
-                try:
-                    run_single_evaluation(
-                        model=args.model,
-                        model_name=args.model_name,
-                        eval_data_path=eval_path,
-                        clean_data_path=clean_data_path,
-                        term=term,
-                        base_data_dir=args.base_data_dir,
-                        properties_path=args.properties_path,
-                        output_dir=str(output_dir),
-                        prediction_length=args.prediction_length,
-                        num_samples=args.num_samples,
-                        batch_size=args.batch_size,
-                        device=args.device,
-                        imputation_method=method,
-                        imputed_data_dir=args.imputed_data_dir,
-                        intermediate_dir=args.intermediate_dir,
-                        predict_batches_jointly=args.predict_batches_jointly,
-                        torch_dtype=args.torch_dtype,
-                    )
-                    succeeded += 1
-                except Exception as exc:
-                    failed += 1
-                    print(f"✗ Failed: {eval_name} / {method} -> {exc}")
-                finally:
-                    _cleanup_runtime(args.device)
+            tqdm.write(f"▶ Running: {eval_name} | term={term} | impute={method}")
+            try:
+                run_single_evaluation(
+                    model=args.model,
+                    model_name=args.model_name,
+                    eval_data_path=task["eval_path"],
+                    clean_data_path=task["clean_data_path"],
+                    term=term,
+                    base_data_dir=args.base_data_dir,
+                    properties_path=args.properties_path,
+                    output_dir=str(output_dir),
+                    prediction_length=args.prediction_length,
+                    num_samples=args.num_samples,
+                    batch_size=args.batch_size,
+                    device=args.device,
+                    imputation_method=method,
+                    imputed_data_dir=args.imputed_data_dir,
+                    intermediate_dir=args.intermediate_dir,
+                    predict_batches_jointly=args.predict_batches_jointly,
+                    torch_dtype=args.torch_dtype,
+                )
+                succeeded += 1
+            except Exception as exc:
+                failed += 1
+                tqdm.write(f"✗ Failed: {eval_name} / {method} -> {exc}")
+            finally:
+                _cleanup_runtime(args.device)
+    pbar.close()
 
     print("\n" + "=" * 80)
     print("Done")
