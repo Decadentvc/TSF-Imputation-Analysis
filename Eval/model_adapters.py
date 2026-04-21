@@ -386,233 +386,107 @@ class TimesFM2p5Adapter:
 
 
 @dataclass
-class Kairos23mAdapter:
+class KairosAdapter:
+    """通用 Kairos 适配器：直接调用 `tsfm.model.kairos.AutoModel`，输出 9 分位数预测。
+
+    参照 `Eval/kairos_model.py` 与 `Eval/kairos.ipynb` 的推理流程：
+      1. 通过 `AutoModel.from_pretrained(model_name, trust_remote_code=True)` 加载权重
+      2. 对每个序列左侧 pad / 截断到 `context_length`，填充 NaN 由模型处理
+      3. 调用 `model(past_target, prediction_length, generation=True, ...)['prediction_outputs']`
+         得到 [batch, n_quantiles, pred_len] 的分位数张量
+      4. 遇到显存不足时自动将 batch_size 折半重试
+    """
+
     prediction_length: int
-    num_samples: int = 100
-    batch_size: int = 32
-    device: str = "cpu"
-    model_name: str = "mldi-lab/Kairos_23m"
-    quantile_levels: Optional[List[float]] = None
-
-    def __post_init__(self):
-        self._forecastor = None
-        self._kairos_model = None
-
-        try:
-            from .model.kairos_23m_forecastor import kairos_23m_forecastor
-        except ImportError:
-            try:
-                from model.kairos_23m_forecastor import kairos_23m_forecastor
-            except ImportError:
-                kairos_23m_forecastor = None
-
-        if kairos_23m_forecastor is not None:
-            self._forecastor = kairos_23m_forecastor
-        else:
-            logger.warning(
-                "kairos_23m_forecastor not found, fallback to tsfm Kairos model for %s",
-                self.model_name,
-            )
-            try:
-                from tsfm.model.kairos import AutoModel as KairosAutoModel
-
-                self._kairos_model = KairosAutoModel.from_pretrained(
-                    self.model_name,
-                    trust_remote_code=True,
-                )
-            except Exception as exc:
-                raise RuntimeError(
-                    "Kairos_23m model load failed. Ensure Kairos/tsfm dependencies are installed "
-                    "and provide a valid --model_name (local path or HF repo)."
-                ) from exc
-            self._kairos_model = self._kairos_model.to(self.device)
-            self._kairos_model.eval()
-
-        if self.quantile_levels is None:
-            self.quantile_levels = DEFAULT_QUANTILE_LEVELS
-        if self._forecastor is not None and self.model_name != "mldi-lab/Kairos_23m":
-            logger.warning(
-                "Kairos23mAdapter currently ignores model_name=%s; using forecastor defaults.",
-                self.model_name,
-            )
-
-    @staticmethod
-    def _left_pad_and_stack_1d(tensors: List[torch.Tensor]) -> torch.Tensor:
-        max_len = max(len(c) for c in tensors)
-        padded = []
-        for c in tensors:
-            padding = torch.full(
-                size=(max_len - len(c),),
-                fill_value=torch.nan,
-                device=c.device,
-            )
-            padded.append(torch.concat((padding, c), dim=-1))
-        return torch.stack(padded)
-
-    def _prepare_context(self, context: Iterable[torch.Tensor]) -> torch.Tensor:
-        context = list(context)
-        batch_x = self._left_pad_and_stack_1d(context)
-        if batch_x.ndim == 1:
-            batch_x = batch_x.unsqueeze(0)
-        return batch_x
-
-    def _predict_with_kairos_model(self, batch_x: torch.Tensor) -> np.ndarray:
-        with torch.no_grad():
-            outputs = self._kairos_model(
-                past_target=batch_x,
-                prediction_length=self.prediction_length,
-                generation=True,
-                preserve_positivity=True,
-                average_with_flipped_input=True,
-            )
-
-        if isinstance(outputs, dict):
-            preds = outputs.get("prediction_outputs")
-        else:
-            preds = getattr(outputs, "prediction_outputs", None)
-
-        if preds is None:
-            raise RuntimeError("Kairos_23m output missing prediction_outputs")
-
-        out_arr = preds.detach().cpu().float().numpy()
-        if out_arr.ndim != 3:
-            raise RuntimeError(
-                f"Kairos_23m prediction_outputs ndim must be 3, got {out_arr.ndim}"
-            )
-
-        if out_arr.shape[1] == self.prediction_length:
-            pass
-        elif out_arr.shape[2] == self.prediction_length:
-            out_arr = out_arr.transpose((0, 2, 1))
-        elif out_arr.shape[1] > self.prediction_length:
-            out_arr = out_arr[:, -self.prediction_length :, :]
-        elif out_arr.shape[2] > self.prediction_length:
-            out_arr = out_arr[:, :, -self.prediction_length :].transpose((0, 2, 1))
-        else:
-            raise RuntimeError(
-                "Kairos_23m generated horizon is shorter than prediction_length. "
-                f"output shape={out_arr.shape}, prediction_length={self.prediction_length}"
-            )
-        return out_arr
-
-    def predict(self, test_data_input) -> List[QuantileForecast]:
-        forecasts: List[Any] = []
-        input_entries = [_extract_input_entry(x) for x in list(test_data_input)]
-
-        if self._forecastor is None:
-            forecast_outputs: List[np.ndarray] = []
-            input_metadata = []
-
-            for batch in tqdm(batcher(input_entries, batch_size=self.batch_size)):
-                contexts = [torch.tensor(item["target"]) for item in batch]
-                batch_x = self._prepare_context(contexts)
-
-                if torch.isnan(batch_x).any():
-                    arr = np.array(batch_x)
-                    imputed_rows = [LastValueImputation()(row) for row in arr]
-                    batch_x = torch.tensor(np.vstack(imputed_rows))
-
-                batch_x = batch_x.to(self.device)
-                out_arr = self._predict_with_kairos_model(batch_x)
-
-                forecast_outputs.append(out_arr)
-                for item in batch:
-                    input_metadata.append(
-                        {
-                            "start": item["start"],
-                            "target_length": len(item["target"]),
-                        }
-                    )
-
-            all_samples = np.concatenate(forecast_outputs, axis=0)
-            for item, meta in zip(all_samples, input_metadata):
-                forecast_start_date = meta["start"] + meta["target_length"]
-                forecasts.append(
-                    QuantileForecast(
-                        forecast_arrays=item.transpose((1, 0)),
-                        forecast_keys=list(map(str, self.quantile_levels)),
-                        start_date=forecast_start_date,
-                    )
-                )
-            return forecasts
-
-        for batch in tqdm(batcher(input_entries, batch_size=self.batch_size)):
-            for item in batch:
-                df_input, freq = _build_forecastor_input(item)
-                output_df = self._forecastor(
-                    dataframe=df_input,
-                    forecast_length=self.prediction_length,
-                    num_samples=self.num_samples,
-                    freq=freq,
-                    device=self.device,
-                )
-                point_prediction = pd.to_numeric(
-                    output_df.iloc[:, -1], errors="coerce"
-                ).to_numpy(dtype=np.float64)
-                if point_prediction.shape[0] < self.prediction_length:
-                    raise RuntimeError(
-                        "Kairos_23m returned fewer points than prediction_length."
-                    )
-                forecasts.append(
-                    _to_deterministic_quantile_forecast(
-                        point_prediction[: self.prediction_length],
-                        item["start"] + len(item["target"]),
-                        self.quantile_levels,
-                    )
-                )
-        return forecasts
-
-
-@dataclass
-class Kairos50mAdapter:
-    prediction_length: int
-    num_samples: int = 100
-    batch_size: int = 32
+    num_samples: int = 100  # 接口占位，Kairos 不使用采样
+    batch_size: int = 16
     device: str = "cpu"
     model_name: str = "mldi-lab/Kairos_50m"
     quantile_levels: Optional[List[float]] = None
+    context_length: int = 2048
+    preserve_positivity: bool = True
+    average_with_flipped_input: bool = True
+    kairos_dir: Optional[str] = None
 
     def __post_init__(self):
-        self._forecastor = None
-        self._kairos_model = None
-
-        try:
-            from .model.kairos_50m_forecastor import kairos_50m_forecastor
-        except ImportError:
-            try:
-                from model.kairos_50m_forecastor import kairos_50m_forecastor
-            except ImportError:
-                kairos_50m_forecastor = None
-
-        if kairos_50m_forecastor is not None:
-            self._forecastor = kairos_50m_forecastor
-        else:
-            logger.warning(
-                "kairos_50m_forecastor not found, fallback to tsfm Kairos model for %s",
-                self.model_name,
-            )
-            try:
-                from tsfm.model.kairos import AutoModel as KairosAutoModel
-
-                self._kairos_model = KairosAutoModel.from_pretrained(
-                    self.model_name,
-                    trust_remote_code=True,
-                )
-            except Exception as exc:
-                raise RuntimeError(
-                    "Kairos_50m model load failed. Ensure Kairos/tsfm dependencies are installed "
-                    "and provide a valid --model_name (local path or HF repo)."
-                ) from exc
-            self._kairos_model = self._kairos_model.to(self.device)
-            self._kairos_model.eval()
-
         if self.quantile_levels is None:
             self.quantile_levels = DEFAULT_QUANTILE_LEVELS
-        if self._forecastor is not None and self.model_name != "mldi-lab/Kairos_50m":
-            logger.warning(
-                "Kairos50mAdapter currently ignores model_name=%s; using forecastor defaults.",
-                self.model_name,
+
+        AutoModel = self._import_auto_model(self.kairos_dir)
+        logger.info("Loading Kairos model: %s", self.model_name)
+        self.model = AutoModel.from_pretrained(
+            self.model_name, trust_remote_code=True
+        )
+        self.model = self.model.to(self.device)
+        self.model.eval()
+
+    # ---------------------------- helpers ---------------------------- #
+
+    @staticmethod
+    def _import_auto_model(kairos_dir: Optional[str]):
+        """优先导入已安装的 `tsfm.model.kairos.AutoModel`；否则尝试将本地 Kairos 目录加入 sys.path。"""
+        try:
+            from tsfm.model.kairos import AutoModel  # type: ignore
+
+            return AutoModel
+        except ImportError:
+            pass
+
+        import sys
+
+        candidate_dirs: List[str] = []
+        if kairos_dir:
+            candidate_dirs.append(kairos_dir)
+        candidate_dirs.append(
+            os.path.join(os.path.dirname(__file__), "Kairos")
+        )
+
+        for candidate in candidate_dirs:
+            if candidate and os.path.isdir(candidate) and candidate not in sys.path:
+                sys.path.append(candidate)
+
+        try:
+            from tsfm.model.kairos import AutoModel  # type: ignore
+
+            return AutoModel
+        except ImportError as exc:  # pragma: no cover
+            raise ImportError(
+                "无法导入 tsfm.model.kairos.AutoModel。请安装 Kairos 或将其源码目录 "
+                "（例如 Eval/Kairos）作为 kairos_dir 参数传入。"
+            ) from exc
+
+    @staticmethod
+    def _clean_nan_target(target: np.ndarray) -> np.ndarray:
+        arr = np.asarray(target, dtype=np.float64)
+        if not np.any(np.isnan(arr)):
+            return arr
+        if arr.ndim == 1:
+            return np.asarray(LastValueImputation()(arr), dtype=np.float64)
+        imputed_rows = [LastValueImputation()(row) for row in arr]
+        return np.asarray(np.vstack(imputed_rows), dtype=np.float64)
+
+    def _prepare_context(self, target: np.ndarray) -> torch.Tensor:
+        """左侧 pad / 截断到 `context_length`，与 kairos_model.py 的 _prepare_context 一致。"""
+        series_t = torch.as_tensor(target, dtype=torch.float32)
+        current_length = series_t.shape[-1]
+        if current_length < self.context_length:
+            padding_size = self.context_length - current_length
+            return torch.nn.functional.pad(
+                series_t, (padding_size, 0), mode="constant", value=float("nan")
             )
+        return series_t[..., -self.context_length :]
+
+    def _run_batch(self, batch_tensor: torch.Tensor) -> np.ndarray:
+        outputs = self.model(
+            past_target=batch_tensor,
+            prediction_length=self.prediction_length,
+            generation=True,
+            preserve_positivity=self.preserve_positivity,
+            average_with_flipped_input=self.average_with_flipped_input,
+        )
+        return outputs["prediction_outputs"].detach().cpu().float().numpy()
+
+    # ---------------------------- predict ---------------------------- #
 
     @staticmethod
     def _left_pad_and_stack_1d(tensors: List[torch.Tensor]) -> torch.Tensor:
@@ -674,71 +548,86 @@ class Kairos50mAdapter:
         return out_arr
 
     def predict(self, test_data_input) -> List[QuantileForecast]:
-        forecasts: List[Any] = []
         input_entries = [_extract_input_entry(x) for x in list(test_data_input)]
+        if not input_entries:
+            return []
 
-        if self._forecastor is None:
-            forecast_outputs: List[np.ndarray] = []
-            input_metadata = []
-
-            for batch in tqdm(batcher(input_entries, batch_size=self.batch_size)):
-                contexts = [torch.tensor(item["target"]) for item in batch]
-                batch_x = self._prepare_context(contexts)
-
-                if torch.isnan(batch_x).any():
-                    arr = np.array(batch_x)
-                    imputed_rows = [LastValueImputation()(row) for row in arr]
-                    batch_x = torch.tensor(np.vstack(imputed_rows))
-
-                batch_x = batch_x.to(self.device)
-                out_arr = self._predict_with_kairos_model(batch_x)
-
-                forecast_outputs.append(out_arr)
-                for item in batch:
-                    input_metadata.append(
-                        {
-                            "start": item["start"],
-                            "target_length": len(item["target"]),
-                        }
-                    )
-
-            all_samples = np.concatenate(forecast_outputs, axis=0)
-            for item, meta in zip(all_samples, input_metadata):
-                forecast_start_date = meta["start"] + meta["target_length"]
-                forecasts.append(
-                    QuantileForecast(
-                        forecast_arrays=item.transpose((1, 0)),
-                        forecast_keys=list(map(str, self.quantile_levels)),
-                        start_date=forecast_start_date,
-                    )
+        contexts: List[torch.Tensor] = []
+        for item in input_entries:
+            target = np.asarray(item["target"])
+            if target.ndim == 2 and target.shape[0] == 1:
+                target = target.squeeze(0)
+            if target.ndim != 1:
+                raise ValueError(
+                    f"KairosAdapter 仅支持单变量序列，收到 shape={target.shape}"
                 )
-            return forecasts
+            target = self._clean_nan_target(target)
+            contexts.append(self._prepare_context(target))
 
-        for batch in tqdm(batcher(input_entries, batch_size=self.batch_size)):
-            for item in batch:
-                df_input, freq = _build_forecastor_input(item)
-                output_df = self._forecastor(
-                    dataframe=df_input,
-                    forecast_length=self.prediction_length,
-                    num_samples=self.num_samples,
-                    freq=freq,
-                    device=self.device,
-                )
-                point_prediction = pd.to_numeric(
-                    output_df.iloc[:, -1], errors="coerce"
-                ).to_numpy(dtype=np.float64)
-                if point_prediction.shape[0] < self.prediction_length:
-                    raise RuntimeError(
-                        "Kairos_50m returned fewer points than prediction_length."
+        total_items = len(contexts)
+        batch_size = max(1, int(self.batch_size))
+        predictions_list: List[np.ndarray] = []
+
+        with torch.no_grad():
+            while True:
+                try:
+                    predictions_list = []
+                    for start in tqdm(
+                        range(0, total_items, batch_size), desc="Kairos"
+                    ):
+                        end = min(start + batch_size, total_items)
+                        batch_tensor = torch.stack(contexts[start:end]).to(self.device)
+                        predictions_list.append(self._run_batch(batch_tensor))
+                    break
+                except torch.cuda.OutOfMemoryError:  # pragma: no cover
+                    if batch_size <= 1:
+                        raise
+                    new_batch = batch_size // 2
+                    logger.warning(
+                        "Kairos OOM at batch_size=%d, halving to %d",
+                        batch_size,
+                        new_batch,
                     )
-                forecasts.append(
-                    _to_deterministic_quantile_forecast(
-                        point_prediction[: self.prediction_length],
-                        item["start"] + len(item["target"]),
-                        self.quantile_levels,
-                    )
+                    batch_size = new_batch
+                    if self.device.startswith("cuda"):
+                        torch.cuda.empty_cache()
+
+        predictions = np.concatenate(predictions_list, axis=0)
+
+        forecasts: List[QuantileForecast] = []
+        q_levels = self.quantile_levels or DEFAULT_QUANTILE_LEVELS
+        n_quantiles = len(q_levels)
+        for pred, entry in zip(predictions, input_entries):
+            forecast_array = np.asarray(pred, dtype=np.float64)
+            if forecast_array.ndim != 2 or forecast_array.shape[0] != n_quantiles:
+                raise RuntimeError(
+                    "Kairos prediction_outputs shape "
+                    f"{forecast_array.shape} 与 quantile 级数 {n_quantiles} 不匹配"
                 )
+            forecast_array = forecast_array[:, : self.prediction_length]
+            forecast_start_date = entry["start"] + len(entry["target"])
+            forecasts.append(
+                QuantileForecast(
+                    forecast_arrays=forecast_array,
+                    forecast_keys=list(map(str, q_levels)),
+                    start_date=forecast_start_date,
+                )
+            )
         return forecasts
+
+
+@dataclass
+class Kairos23mAdapter(KairosAdapter):
+    """`KairosAdapter` 的 23M 默认变体。"""
+
+    model_name: str = "mldi-lab/Kairos_23m"
+
+
+@dataclass
+class Kairos50mAdapter(KairosAdapter):
+    """`KairosAdapter` 的 50M 默认变体。"""
+
+    model_name: str = "mldi-lab/Kairos_50m"
 
 
 @dataclass
