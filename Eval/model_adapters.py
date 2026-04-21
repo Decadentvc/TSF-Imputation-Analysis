@@ -734,6 +734,8 @@ class TimesFM2p0Adapter:
     def predict(self, test_data_input) -> List[QuantileForecast]:
         forecasts: List[QuantileForecast] = []
         input_entries = [_extract_input_entry(x) for x in list(test_data_input)]
+        base_horizon = int(getattr(self._timesfm_model.config, "horizon_length", 128))
+        self._timesfm_model.horizon_len = max(int(self.prediction_length), base_horizon)
 
         for batch in tqdm(batcher(input_entries, batch_size=self.batch_size)):
             contexts: List[torch.Tensor] = []
