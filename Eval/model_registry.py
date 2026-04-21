@@ -30,6 +30,22 @@ except ImportError:
     )
 
 
+def _opt_str(raw: object, default: str) -> str:
+    return default if raw is None else str(raw)
+
+
+def _opt_int(raw: object, default: int) -> int:
+    if raw is None:
+        return default
+    if isinstance(raw, bool):
+        return int(raw)
+    if isinstance(raw, (int, float)):
+        return int(raw)
+    if isinstance(raw, (str, bytes)):
+        return int(raw)
+    raise TypeError(f"Cannot convert {type(raw).__name__} to int")
+
+
 def build_model_adapter(
     model: str,
     prediction_length: int,
@@ -102,6 +118,12 @@ def build_model_adapter(
             batch_size=batch_size,
             device=device,
             model_name=model_name or "visiontspp-local",
+            model_size=_opt_str(kwargs.get("model_size"), "base").lower(),
+            context_length=_opt_int(kwargs.get("context_length"), 4000),
+            ckpt_dir=_opt_str(kwargs.get("ckpt_dir"), "./hf_models/VisionTSpp"),
+            num_patch_input=_opt_int(kwargs.get("num_patch_input"), 7),
+            padding_mode=_opt_str(kwargs.get("padding_mode"), "constant"),
+            max_vars_per_pass=_opt_int(kwargs.get("max_vars_per_pass"), 16),
         )
 
     raise ValueError(

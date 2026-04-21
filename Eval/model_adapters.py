@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional, Protocol
 
@@ -551,54 +552,295 @@ class TimesFM2p0Adapter:
 
 @dataclass
 class VisionTSppAdapter:
+    """VisionTS++ 适配器：直接调用 `visionts.VisionTSpp` 模型，输出 9 分位数预测。
+
+    参照 `Eval/visiontspp.py` 的推理流程：
+      1. 按 ckpt_dir / model_size 解析权重文件路径，缺失时通过 HuggingFace 下载
+      2. 构造 VisionTSpp 模型（quantile=True、color=True），在预测前调用
+         update_config(context_len, pred_len, periodicity, ...)
+      3. 输出 [median, quantile_list] 后合并为 9 分位数的 QuantileForecast
+    """
+
     prediction_length: int
-    num_samples: int = 100
+    num_samples: int = 100  # 为了统一接口保留（VisionTS++ 不使用采样）
     batch_size: int = 32
     device: str = "cpu"
     model_name: str = "visiontspp-local"
     quantile_levels: Optional[List[float]] = None
+    model_size: str = "base"
+    context_length: int = 4000
+    ckpt_dir: str = "./hf_models/VisionTSpp"
+    num_patch_input: int = 7
+    padding_mode: str = "constant"
+    max_vars_per_pass: int = 16
 
     def __post_init__(self):
         try:
-            from .model.visiontspp_forecastor import visiontspp_forecastor
-        except ImportError:
-            from model.visiontspp_forecastor import visiontspp_forecastor
+            from visionts import VisionTSpp
+            import visionts.util as visionts_util
+        except ImportError as exc:  # pragma: no cover
+            raise ImportError(
+                "visionts 未安装。请先安装 VisionTSpp 包（参考 src/visionts）"
+            ) from exc
 
-        self._forecastor = visiontspp_forecastor
+        try:
+            from huggingface_hub import snapshot_download
+        except ImportError as exc:  # pragma: no cover
+            raise ImportError(
+                "huggingface_hub 未安装。请先安装: pip install huggingface_hub"
+            ) from exc
+
         if self.quantile_levels is None:
             self.quantile_levels = DEFAULT_QUANTILE_LEVELS
+
+        size_key = str(self.model_size).lower()
+        if size_key == "base":
+            arch = "mae_base"
+            ckpt_filename = "visiontspp_base.ckpt"
+        elif size_key == "large":
+            arch = "mae_large"
+            ckpt_filename = "visiontspp_large.ckpt"
+        else:
+            raise ValueError(
+                f"model_size 必须是 'base' 或 'large'，当前值: {self.model_size}"
+            )
+
+        ckpt_path = os.path.join(self.ckpt_dir, ckpt_filename)
+        if not os.path.exists(ckpt_path):
+            logger.info("Downloading VisionTSpp checkpoint to %s", self.ckpt_dir)
+            snapshot_download(
+                repo_id="Lefei/VisionTSpp",
+                local_dir=self.ckpt_dir,
+                local_dir_use_symlinks=False,
+            )
+            if not os.path.exists(ckpt_path):
+                raise FileNotFoundError(
+                    f"VisionTSpp checkpoint missing after download: {ckpt_path}"
+                )
+
         if self.model_name != "visiontspp-local":
             logger.warning(
-                "VisionTSppAdapter currently ignores model_name=%s; using forecastor defaults.",
+                "VisionTSppAdapter currently ignores model_name=%s; using local checkpoint.",
                 self.model_name,
             )
 
-    def predict(self, test_data_input) -> List[QuantileForecast]:
-        forecasts: List[QuantileForecast] = []
-        input_entries = [_extract_input_entry(x) for x in list(test_data_input)]
+        self._visionts_util = visionts_util
+        self.model = VisionTSpp(
+            arch,
+            ckpt_path=ckpt_path,
+            quantile=True,
+            clip_input=True,
+            complete_no_clip=False,
+            color=True,
+        ).to(self.device)
+        self.model.eval()
 
-        for batch in tqdm(batcher(input_entries, batch_size=self.batch_size)):
-            for item in batch:
-                df_input, freq = _build_forecastor_input(item)
-                output_df = self._forecastor(
-                    dataframe=df_input,
-                    forecast_length=self.prediction_length,
-                    num_samples=self.num_samples,
-                    freq=freq,
-                    device=self.device,
+    # ---------------------------- helpers ---------------------------- #
+
+    @staticmethod
+    def _normalize_offset_name(name: str) -> str:
+        base = name.split("-")[0]
+        base_lower = base.lower()
+        if base_lower == "min":
+            return "T"
+        if base_lower == "h":
+            return "H"
+        if base_lower == "s":
+            return "S"
+        if base_lower == "d":
+            return "D"
+        if base_lower == "w":
+            return "W"
+        if base_lower in ("me", "ms", "m"):
+            return "M"
+        if base_lower.startswith("q"):
+            return "Q"
+        if base_lower.startswith(("y", "a")):
+            return "A"
+        if base_lower == "b":
+            return "B"
+        return base.upper()
+
+    def _resolve_periodicity(self, freq: Optional[str]) -> int:
+        """将频率映射为周期。优先用 visionts.util.POSSIBLE_SEASONALITIES。"""
+        if not freq:
+            return 1
+
+        try:
+            offset = pd.tseries.frequencies.to_offset(freq)
+            base = self._normalize_offset_name(offset.name)
+            base_seasonality_list = self._visionts_util.POSSIBLE_SEASONALITIES.get(
+                base, []
+            )
+            candidates: List[int] = []
+            for base_season in base_seasonality_list:
+                seasonality, remainder = divmod(base_season, max(offset.n, 1))
+                if not remainder:
+                    candidates.append(seasonality)
+            candidates.append(1)
+            return candidates[0]
+        except Exception:
+            try:
+                from visionts import freq_to_seasonality_list
+
+                return freq_to_seasonality_list(freq)[0]
+            except Exception:
+                return 1
+
+    @staticmethod
+    def _clean_nan_target(target: np.ndarray) -> np.ndarray:
+        arr = np.asarray(target, dtype=np.float64)
+        if not np.any(np.isnan(arr)):
+            return arr
+        if arr.ndim == 1:
+            return np.asarray(LastValueImputation()(arr), dtype=np.float64)
+        imputed_rows = [LastValueImputation()(row) for row in arr]
+        return np.asarray(np.vstack(imputed_rows), dtype=np.float64)
+
+    def _run_inference(
+        self, input_tensor: torch.Tensor, periodicity: int
+    ) -> List[Any]:
+        """与 visiontspp.py 中的 run_inference 等价，支持大变量数下分段。"""
+        curr_ctx_len = input_tensor.shape[1]
+        nvars_input = input_tensor.shape[2]
+        max_vars = max(1, int(self.max_vars_per_pass))
+
+        def _run_single_pass(tensor_chunk: torch.Tensor):
+            chunk_vars = tensor_chunk.shape[2]
+            self.model.update_config(
+                context_len=curr_ctx_len,
+                pred_len=self.prediction_length,
+                periodicity=periodicity,
+                num_patch_input=self.num_patch_input,
+                padding_mode=self.padding_mode,
+            )
+            color_list = [i % 3 for i in range(chunk_vars)]
+            with torch.no_grad():
+                return self.model(
+                    tensor_chunk, export_image=False, color_list=color_list
                 )
-                point_prediction = pd.to_numeric(
-                    output_df.iloc[:, -1], errors="coerce"
-                ).to_numpy(dtype=np.float64)
-                if point_prediction.shape[0] < self.prediction_length:
-                    raise RuntimeError(
-                        "VisionTSpp returned fewer points than prediction_length."
+
+        if nvars_input <= max_vars:
+            return _run_single_pass(input_tensor)
+
+        median_chunks: List[torch.Tensor] = []
+        quantile_chunks: Optional[List[List[torch.Tensor]]] = None
+        for start in range(0, nvars_input, max_vars):
+            end = min(start + max_vars, nvars_input)
+            chunk_output = _run_single_pass(input_tensor[:, :, start:end])
+            preds_data = (
+                chunk_output[0] if isinstance(chunk_output, tuple) else chunk_output
+            )
+            med_chunk = preds_data[0]
+            q_chunk_list = preds_data[1]
+
+            median_chunks.append(med_chunk)
+            if quantile_chunks is None:
+                quantile_chunks = [[] for _ in range(len(q_chunk_list))]
+            for qi, q_tensor in enumerate(q_chunk_list):
+                quantile_chunks[qi].append(q_tensor)
+
+        med_full = torch.cat(median_chunks, dim=2)
+        q_full = [torch.cat(parts, dim=2) for parts in (quantile_chunks or [])]
+        return [med_full, q_full]
+
+    @staticmethod
+    def _build_forecast_array(
+        medians: np.ndarray, q_np_list: List[np.ndarray], idx: int
+    ) -> np.ndarray:
+        """将 VisionTS++ 的 (median, 8 quantiles) 输出拼接为 [9, nvars, pred_len]。"""
+        qs_sample = [q[idx] for q in q_np_list]
+        qs_stacked = np.stack(qs_sample, axis=0)  # [8, pred_len, nvars]
+        med_expanded = np.expand_dims(medians[idx], axis=0)  # [1, pred_len, nvars]
+        full_quantiles = np.concatenate(
+            [qs_stacked[:4], med_expanded, qs_stacked[4:]], axis=0
+        )  # [9, pred_len, nvars]
+        return full_quantiles.transpose(0, 2, 1)  # [9, nvars, pred_len]
+
+    def _process_tensor(
+        self, tensor: torch.Tensor, periodicity: int
+    ) -> List[np.ndarray]:
+        output = self._run_inference(tensor, periodicity)
+        preds_data = output[0] if isinstance(output, tuple) else output
+        medians = preds_data[0].detach().cpu().numpy()
+        q_np_list = [q.detach().cpu().numpy() for q in preds_data[1]]
+        return [
+            self._build_forecast_array(medians, q_np_list, i)
+            for i in range(medians.shape[0])
+        ]
+
+    # ---------------------------- predict ---------------------------- #
+
+    def predict(self, test_data_input) -> List[QuantileForecast]:
+        input_entries = [_extract_input_entry(x) for x in list(test_data_input)]
+        if not input_entries:
+            return []
+
+        # 推断 freq & periodicity（eval_pipeline 保证所有 entry 同频率）
+        freq: Optional[str] = None
+        for item in input_entries:
+            start = item.get("start")
+            if start is not None:
+                freq = getattr(start, "freqstr", None)
+                if freq:
+                    break
+        periodicity = self._resolve_periodicity(freq)
+        logger.info(
+            "VisionTSpp inference: freq=%s, periodicity=%s, pred_len=%s",
+            freq,
+            periodicity,
+            self.prediction_length,
+        )
+
+        # 每个 adapter entry 都是单变量 1D target → 转为 [seq_len, 1] 张量
+        context_list: List[torch.Tensor] = []
+        for item in input_entries:
+            target = np.asarray(item["target"])
+            if target.shape[-1] > self.context_length:
+                target = target[..., -self.context_length :]
+            target = self._clean_nan_target(target)
+            if target.ndim == 1:
+                target = target[np.newaxis, :]
+            context_list.append(torch.tensor(target.T).float())
+
+        fc_quantiles: List[np.ndarray] = []
+        total_items = len(context_list)
+
+        for start in tqdm(
+            range(0, total_items, self.batch_size), desc="VisionTSpp"
+        ):
+            end = min(start + self.batch_size, total_items)
+            batch_list = context_list[start:end]
+
+            try:
+                batch_input = torch.stack(batch_list).to(self.device)
+                fc_quantiles.extend(self._process_tensor(batch_input, periodicity))
+            except RuntimeError as exc:
+                # 序列长度不一致或显存不足时，回退为逐样本推理
+                if "stack" not in str(exc) and "out of memory" not in str(exc).lower():
+                    raise
+                if "out of memory" in str(exc).lower():
+                    torch.cuda.empty_cache() if self.device.startswith("cuda") else None
+                for item_tensor in batch_list:
+                    single_input = item_tensor.unsqueeze(0).to(self.device)
+                    fc_quantiles.extend(
+                        self._process_tensor(single_input, periodicity)
                     )
-                forecasts.append(
-                    _to_deterministic_quantile_forecast(
-                        point_prediction[: self.prediction_length],
-                        item["start"] + len(item["target"]),
-                        self.quantile_levels,
-                    )
+
+        forecasts: List[QuantileForecast] = []
+        q_levels = self.quantile_levels or DEFAULT_QUANTILE_LEVELS
+        for raw_array, entry in zip(fc_quantiles, input_entries):
+            # raw_array shape: [9, nvars, pred_len]；单变量 nvars=1
+            forecast_array = raw_array[:, 0, :] if raw_array.ndim == 3 else raw_array
+            forecast_array = forecast_array[:, : self.prediction_length].astype(
+                np.float64
+            )
+            forecast_start_date = entry["start"] + len(entry["target"])
+            forecasts.append(
+                QuantileForecast(
+                    forecast_arrays=forecast_array,
+                    forecast_keys=list(map(str, q_levels)),
+                    start_date=forecast_start_date,
                 )
+            )
         return forecasts
