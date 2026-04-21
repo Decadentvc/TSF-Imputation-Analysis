@@ -26,6 +26,10 @@ python Eval/run_eval.py batch --model timesfm2p5 --dataset ETTh1 --method BM --i
 - `sundial`
 - `chronos2`
 - `timesfm2p5`
+- `kairos23m`
+- `kairos50m`
+- `timesfm2p0`
+- `visiontspp`
 
 ### 使用不同模型时需要改什么
 
@@ -35,6 +39,10 @@ python Eval/run_eval.py batch --model timesfm2p5 --dataset ETTh1 --method BM --i
   - `sundial`：主要使用 `--num_samples`
   - `chronos2`：可用 `--predict_batches_jointly`、`--torch_dtype`
   - `timesfm2p5`：通常只需 `--batch_size`、`--device`（`--model_name` 可覆盖默认 checkpoint）
+  - `kairos23m`：主要使用通用参数，默认 `--model_name mldi-lab/Kairos_23m`，通过远程仓库加载模型，不依赖本地 forecastor。
+  - `kairos50m`：主要使用通用参数，默认 `--model_name mldi-lab/Kairos_50m`，通过远程仓库加载模型，不依赖本地 forecastor。
+  - `timesfm2p0`：主要使用通用参数，默认 `--model_name google/timesfm-2.0-500m-pytorch`，已支持按 `prediction_length` 动态扩展 horizon（支持 long term）。
+  - `visiontspp`：主要使用通用参数，默认 `--model_name Lefei/VisionTSpp`，通过 Hugging Face 下载模型，不依赖本地 forecastor。
 
 ### 如何添加新模型
 
@@ -144,6 +152,9 @@ python Eval/run_eval.py batch --model timesfm2p5 --dataset ETTh1 --method BM --i
 - 通用：`numpy`, `pandas`, `torch`, `gluonts`, `transformers`, `tqdm`
 - `chronos2`：`chronos-forecasting>=2.1`
 - `timesfm2p5`：`timesfm`（需包含 `timesfm_2p5_torch`）
+- `kairos23m` / `kairos50m`：需要可用 `tsfm`（包含 `tsfm.model.kairos`）。
+- `timesfm2p0`：需要支持 TimesFM 的 `transformers` 版本（包含 `TimesFmModelForPrediction`）。
+- `visiontspp`：需要 `visionts` 与 `huggingface_hub`。
 
 如报 `ModuleNotFoundError`，请先在当前环境补齐依赖。
 
