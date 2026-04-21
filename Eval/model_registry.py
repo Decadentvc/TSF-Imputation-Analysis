@@ -12,6 +12,7 @@ try:
         Chronos2Adapter,
         Kairos23mAdapter,
         Kairos50mAdapter,
+        KairosAdapter,
         SundialAdapter,
         TimesFM2p0Adapter,
         TimesFM2p5Adapter,
@@ -23,6 +24,7 @@ except ImportError:
         Chronos2Adapter,
         Kairos23mAdapter,
         Kairos50mAdapter,
+        KairosAdapter,
         SundialAdapter,
         TimesFM2p0Adapter,
         TimesFM2p5Adapter,
@@ -44,6 +46,42 @@ def _opt_int(raw: object, default: int) -> int:
     if isinstance(raw, (str, bytes)):
         return int(raw)
     raise TypeError(f"Cannot convert {type(raw).__name__} to int")
+
+
+def _opt_bool(raw: object, default: bool) -> bool:
+    if raw is None:
+        return default
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, (int, float)):
+        return bool(raw)
+    if isinstance(raw, str):
+        return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return default
+
+
+KAIROS_SIZE_MAP = {
+    "10m": "mldi-lab/Kairos_10m",
+    "23m": "mldi-lab/Kairos_23m",
+    "50m": "mldi-lab/Kairos_50m",
+    "small": "mldi-lab/Kairos_10m",
+    "base": "mldi-lab/Kairos_23m",
+    "large": "mldi-lab/Kairos_50m",
+}
+
+
+def _kairos_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
+    """从 build_model_adapter 的 **kwargs 中抽取 Kairos 共用可选参数。"""
+    kairos_opt: dict[str, Any] = {
+        "context_length": _opt_int(kwargs.get("context_length"), 2048),
+        "preserve_positivity": _opt_bool(kwargs.get("preserve_positivity"), True),
+        "average_with_flipped_input": _opt_bool(
+            kwargs.get("average_with_flipped_input"), True
+        ),
+    }
+    if kwargs.get("kairos_dir") is not None:
+        kairos_opt["kairos_dir"] = _opt_str(kwargs.get("kairos_dir"), "")
+    return kairos_opt
 
 
 def build_model_adapter(
@@ -84,6 +122,20 @@ def build_model_adapter(
             model_name=model_name or "google/timesfm-2.5-200m-pytorch",
         )
 
+    if model_key in {"kairos", "kairos_auto"}:
+        size_raw = _opt_str(kwargs.get("model_size"), "").lower()
+        resolved = model_name or KAIROS_SIZE_MAP.get(size_raw)
+        if resolved is None:
+            resolved = "mldi-lab/Kairos_50m"
+        return KairosAdapter(
+            prediction_length=prediction_length,
+            num_samples=num_samples,
+            batch_size=batch_size,
+            device=device,
+            model_name=resolved,
+            **_kairos_kwargs(kwargs),
+        )
+
     if model_key in {"kairos23m", "kairos_23m"}:
         return Kairos23mAdapter(
             prediction_length=prediction_length,
@@ -91,6 +143,7 @@ def build_model_adapter(
             batch_size=batch_size,
             device=device,
             model_name=model_name or "mldi-lab/Kairos_23m",
+            **_kairos_kwargs(kwargs),
         )
 
     if model_key in {"kairos50m", "kairos_50m"}:
@@ -100,6 +153,7 @@ def build_model_adapter(
             batch_size=batch_size,
             device=device,
             model_name=model_name or "mldi-lab/Kairos_50m",
+            **_kairos_kwargs(kwargs),
         )
 
     if model_key in {"timesfm2p0", "timesfm_2p0_500m", "timesfm2p0_500m"}:
@@ -128,5 +182,5 @@ def build_model_adapter(
 
     raise ValueError(
         f"Unsupported model: {model}. Available: sundial, chronos2, timesfm2p5, "
-        f"kairos23m, kairos50m, timesfm2p0, visiontspp"
+        f"kairos, kairos23m, kairos50m, timesfm2p0, visiontspp"
     )
