@@ -409,6 +409,65 @@ class Kairos23mAdapter:
                 self.model_name,
             )
 
+    @staticmethod
+    def _left_pad_and_stack_1d(tensors: List[torch.Tensor]) -> torch.Tensor:
+        max_len = max(len(c) for c in tensors)
+        padded = []
+        for c in tensors:
+            padding = torch.full(
+                size=(max_len - len(c),),
+                fill_value=torch.nan,
+                device=c.device,
+            )
+            padded.append(torch.concat((padding, c), dim=-1))
+        return torch.stack(padded)
+
+    def _prepare_context(self, context: Iterable[torch.Tensor]) -> torch.Tensor:
+        context = list(context)
+        batch_x = self._left_pad_and_stack_1d(context)
+        if batch_x.ndim == 1:
+            batch_x = batch_x.unsqueeze(0)
+        return batch_x
+
+    def _predict_with_kairos_model(self, batch_x: torch.Tensor) -> np.ndarray:
+        with torch.no_grad():
+            outputs = self._kairos_model(
+                past_target=batch_x,
+                prediction_length=self.prediction_length,
+                generation=True,
+                preserve_positivity=True,
+                average_with_flipped_input=True,
+            )
+
+        if isinstance(outputs, dict):
+            preds = outputs.get("prediction_outputs")
+        else:
+            preds = getattr(outputs, "prediction_outputs", None)
+
+        if preds is None:
+            raise RuntimeError("Kairos_50m output missing prediction_outputs")
+
+        out_arr = preds.detach().cpu().float().numpy()
+        if out_arr.ndim != 3:
+            raise RuntimeError(
+                f"Kairos_50m prediction_outputs ndim must be 3, got {out_arr.ndim}"
+            )
+
+        if out_arr.shape[1] == self.prediction_length:
+            pass
+        elif out_arr.shape[2] == self.prediction_length:
+            out_arr = out_arr.transpose((0, 2, 1))
+        elif out_arr.shape[1] > self.prediction_length:
+            out_arr = out_arr[:, -self.prediction_length :, :]
+        elif out_arr.shape[2] > self.prediction_length:
+            out_arr = out_arr[:, :, -self.prediction_length :].transpose((0, 2, 1))
+        else:
+            raise RuntimeError(
+                "Kairos_50m generated horizon is shorter than prediction_length. "
+                f"output shape={out_arr.shape}, prediction_length={self.prediction_length}"
+            )
+        return out_arr
+
     def predict(self, test_data_input) -> List[QuantileForecast]:
         forecasts: List[QuantileForecast] = []
         input_entries = [_extract_input_entry(x) for x in list(test_data_input)]
