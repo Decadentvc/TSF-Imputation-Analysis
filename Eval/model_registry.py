@@ -101,7 +101,7 @@ def build_model_adapter(
             num_samples=num_samples,
             batch_size=batch_size,
             device=device,
-            model_name=model_name or "visiontspp-local",
+            model_name=model_name or "Lefei/VisionTSpp",
         )
 
     raise ValueError(
