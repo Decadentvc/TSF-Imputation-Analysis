@@ -1,140 +1,181 @@
 # Analysis 模块说明
 
-`analysis` 目录提供窗口级别的特征分析工具，能够针对以下三类数据批量计算 6 个基于 STL 的时间序列特征指标：
+`Analysis/` 目录提供窗口级别的时间序列特征分析工具，对以下三类窗口批量计算 6 个基于 STL 分解的特征指标：
 
-1. **预测窗口**：`datasets/Intermediate_Predictions` 中的各个预测结果片段。
-2. **干净历史窗口**：原始 `datasets/ori` 数据集中与预测窗口相邻的历史部分。
-3. **填补历史窗口**：`datasets/Imputed` 中不同缺失注入与填补策略生成的序列。
-
----
-
-## 一、目录结构适配
-
-### 预测窗口目录结构
-
-模块支持两种预测窗口目录结构：
-
-#### 1. 干净数据预测窗口
-```
-datasets/Intermediate_Predictions/
-└── {dataset}_clean_{term}_prediction/
-    ├── {dataset}_clean_{term}_prediction_0.csv
-    ├── {dataset}_clean_{term}_prediction_1.csv
-    └── ...
-```
-
-#### 2. 填补数据预测窗口（按填补方法分目录）
-```
-datasets/Intermediate_Predictions/
-└── {dataset}_{method}_length{length}_{ratio}_{term}_prediction/
-    ├── linear/                              # 填补方法子目录
-    │   ├── {dataset}_{method}_..._prediction_0.csv
-    │   └── ...
-    ├── mean/
-    │   └── ...
-    └── forward/
-        └── ...
-```
+1. **模型预测窗口**：`data/Intermediate_Predictions/<model>/...` 下每个模型输出的预测片段（含干净与填补两类来源）。
+2. **历史窗口**：预测窗口紧邻的前 `max_context` 段历史（可来自干净数据或填补数据）。
+3. **干净预测真实值窗口**：`data/datasets/ori/<dataset>.csv` 中与预测区间对齐的真值切片，用作与预测窗口的 Ground-Truth 比较。
 
 ---
 
-## 二、使用方式
+## 一、快速开始（可直接复制执行）
 
-### 1. 单次分析脚本 `analysis/window_analysis.py`
+> 下列指令均在 `Sundial` conda 环境下验证。按所用终端类型任选一条进入工程目录并激活环境，随后追加具体脚本命令。
 
-该脚本通过 `mode` 子命令区分分析对象，可在任意目录使用 `python -m analysis.window_analysis` 调用。
+- Git Bash：
+  ```bash
+  cd /d/Project/TSF-Imputation-Analysis && source /d/anaconda3/Scripts/activate Sundial
+  ```
+- Windows CMD：
+  ```cmd
+  cd /d d:\Project\TSF-Imputation-Analysis && call D:\anaconda3\Scripts\activate.bat Sundial
+  ```
+- PowerShell：
+  ```powershell
+  cd d:\Project\TSF-Imputation-Analysis; & D:\anaconda3\shell\condabin\conda-hook.ps1; conda activate Sundial
+  ```
 
-#### (1) 预测窗口
-- **命令示例**（必须单行）：
-  - 干净数据：`python -m analysis.window_analysis prediction --prediction_dir datasets/Intermediate_Predictions/ETTh1_clean_long_prediction --output results/example_prediction.json`
-  - 填补数据：`python -m analysis.window_analysis prediction --prediction_dir datasets/Intermediate_Predictions/ETTh1_BM_length50_010_long_prediction/linear --output results/example_prediction.json`
-- **主要参数**
-  - `--prediction_dir`：预测窗口所在目录。对于填补数据，路径应指向填补方法子目录。
-  - `--output`（可选）：保存 JSON 结果的路径。
+### 1. 模型预测/历史窗口批量分析（`run_batch_analysis.py`）
 
-#### (2) 干净历史窗口
-- **命令示例**：
-  - `python -m analysis.window_analysis history --dataset ETTh1 --term long --output results/example_clean_history.json`
-- **主要参数**
-  - `--dataset`：数据集名称（需出现在 `datasets/dataset_properties.json`）。
-  - `--term`：预测周期，支持 `short|medium|long`，默认 `short`。
-  - `--output`：可选输出路径。
+```bash
+# 默认：对 sundial 的所有可用 dataset × term × 填补方法跑预测 + 历史窗口分析
+python Analysis/run_batch_analysis.py --model sundial
 
-#### (3) 填补历史窗口
-`window_analysis.py` 中提供 `analyze_imputed_history_windows` 函数，若需要独立脚本，可仿照 `history` 子命令调用；日常推荐使用下述批量脚本统一跑完所有填补方案。
+# 多模型 + 指定 term
+python Analysis/run_batch_analysis.py --model sundial chronos2 --terms short,medium,long
 
-### 2. 批量分析脚本 `analysis/batch_window_analysis.py`
+# 仅跑干净数据的预测窗口
+python Analysis/run_batch_analysis.py --model sundial --clean_only --prediction_only
 
-`batch_window_analysis.py` 会自动遍历所有已生成的数据，按顺序完成预测窗口、干净历史、填补历史分析，并把结果写到 `results/window_analysis`。
+# 指定单个数据集 + 指定填补方法 + 强制覆盖
+python Analysis/run_batch_analysis.py --model timesfm2p5 --dataset ETTh1 --imputation_methods linear,mean --force
+```
 
-- **基础命令**（单行）：
-  - `python -m analysis.batch_window_analysis`
+### 2. 干净预测真实值窗口分析（`run_clean_prediction_window_analysis.py`）
 
-- **常用参数**
-  | 参数 | 说明 |
-  | --- | --- |
-  | `--output_dir` | 结果保存根目录，默认 `results/window_analysis` |
-  | `--datasets` | 逗号分隔的指定数据集（如 `ETTh1,ETTh2`） |
-  | `--terms` | 逗号分隔的 term（如 `short,long`） |
-  | `--impute_methods` | 逗号分隔的填补方法（如 `linear,mean`） |
-  | `--skip_predictions` | 跳过预测窗口分析 |
-  | `--skip_clean_history` | 跳过干净历史分析 |
-  | `--skip_imputed_history` | 跳过填补历史分析 |
+```bash
+# 默认：扫描 data/datasets/ori/ 下全部数据集，term 按 dataset_properties.json 自动选
+python Analysis/run_clean_prediction_window_analysis.py
 
-执行完成后会在 `results/window_analysis` 生成：
-- `predictions/`：预测窗口分析结果，文件名格式：
-  - 干净数据：`{dataset}_clean_{term}.json`
-  - 填补数据：`{dataset}_{method}_{ratio}_{term}_{imputation_method}.json`
-- `clean_history/`：干净历史窗口分析结果
-- `imputed_history/`：填补历史窗口分析结果
-- `summary.json`：统计整体运行概览
+# 指定若干数据集 + 全部 term
+python Analysis/run_clean_prediction_window_analysis.py --dataset ETTh1 ETTh2 ETTm1 --terms short,medium,long
 
-### 3. 输出格式
+# 仅分析 short term，并强制覆盖既有结果
+python Analysis/run_clean_prediction_window_analysis.py --terms short --force
+```
 
-所有分析函数默认写出 **JSON**，其结构包含：
-- 元信息：数据集、term、缺失/填补配置、周期等。
-- `imputation_method`：填补方法名称（仅填补数据预测窗口有此字段）。
-- `summary`：对 6 个指标的 `mean/std/min/max`。
-- `window_results`：每个窗口的指标与索引信息。如果需要 CSV，可在读取 JSON 后视需要再转换为平面表格格式。
+### 3. 单窗口组合交互式分析（`window_analysis.py`）
 
----
+```bash
+# 预测窗口（干净）
+python -m Analysis.window_analysis --model sundial prediction --prediction_dir data/Intermediate_Predictions/sundial/ETTh1_clean_long_prediction
 
-## 三、指标说明
+# 预测窗口（填补方法子目录）
+python -m Analysis.window_analysis --model sundial prediction --prediction_dir data/Intermediate_Predictions/sundial/ETTh1_BM_length50_010_long_prediction/linear
 
-以下指标均基于单变量序列的 STL 分解结果 `(trend, seasonal, residual)` 与原序列：
-
-1. **趋势强度 (trend_strength)**  
-   - 公式：`F_TS = max(0, 1 - Var(R) / Var(T + R))`  
-   - 意义：衡量趋势在信号中占比，越接近 1 趋势越显著。
-
-2. **趋势线性度 (trend_linearity)**  
-   - 方法：将趋势分量拟合为正交二次回归 `T_t = β0 + β1 * P1(t) + β2 * P2(t)`，取 `β1` 为线性度指标。  
-   - 意义：捕捉总体斜率方向，>0 表示上升趋势，<0 表示下降趋势。
-
-3. **季节强度 (seasonal_strength)**  
-   - 公式：`F_SS = max(0, 1 - Var(R) / Var(S + R))`  
-   - 意义：季节性分量的相对强度，范围 [0,1]。
-
-4. **季节相关性 (seasonal_correlation)**  
-   - 计算：截取整数个周期，将所有季节段两两计算皮尔逊相关系数并取平均。  
-   - 意义：衡量不同季节段的一致性，范围 [-1,1]。
-
-5. **残差一阶自相关 (residual_autocorr_lag1)**  
-   - 公式：`F_RA = E[(R_t - R̄)(R_{t-1} - R̄)] / Var(R)`  
-   - 意义：残差的记忆程度，越接近 0 表示残差越独立。
-
-6. **谱熵 (spectral_entropy)**  
-   - 计算：对均值去除后的原序列做 FFT，取功率谱密度（PSD）并计算 `Σ log(PSD)`。  
-   - 意义：衡量频谱分布复杂度，值越大说明频率成分越分散。
-
-这些指标在 `analysis/metrics.py` 中实现，`window_analysis.py` 和 `batch_window_analysis.py` 会在每个窗口对所有数值列取平均后写入结果。
+# 干净历史窗口
+python -m Analysis.window_analysis --model sundial history --dataset ETTh1 --term long
+```
 
 ---
 
-## 四、注意事项
-- 运行前确保 `datasets/dataset_properties.json` 存在且包含所需数据集的 `period` 与 `terms` 信息。
-- 预测/填补目录命名需符合现有正则格式（例如 `dataset_method_length50_ratio_term_prediction`）。
-- STL 分解对时间序列长度有要求，窗口中有效样本需不少于 `2 * period`，否则该列会被跳过。
-- 填补数据预测窗口需要指向具体的填补方法子目录，或让批量脚本自动遍历。
+## 二、脚本详解
 
-如需扩展更多指标或导出其它格式，可在现有脚本基础上添加自定义逻辑。
+### A. `run_batch_analysis.py` — 模型预测 + 历史窗口批量分析
+
+覆盖范围：
+- **预测窗口**：遍历 `data/Intermediate_Predictions/<model>/` 下所有符合命名的目录（`*_clean_*_prediction/` 与 `*_{method}_length*_*_*_prediction/<impute_method>/`），对每个窗口 CSV 计算 6 个指标并聚合。
+- **历史窗口**：按 `inject_range_utils` 从干净数据或填补数据中截取每个预测窗口前 `max_context` 段历史做分析。
+
+核心参数：
+
+| 参数 | 说明 | 默认值 |
+| --- | --- | --- |
+| `--model` | 模型名称，可多选，必填，取值：`sundial` / `chronos2` / `timesfm2p5` | — |
+| `--dataset` | 单个数据集过滤；省略则跑该模型下全部发现的数据集 | 全部 |
+| `--terms` | 逗号或空格分隔的 term，例如 `short,medium,long` | 全部 |
+| `--imputation_methods` | 要分析的填补方法 | `linear,mean,forward,backward` |
+| `--intermediate_dir` | 模型预测结果根目录 | `data/Intermediate_Predictions` |
+| `--output_dir` | 结果输出根目录 | `results_analysis` |
+| `--properties_path` | 数据集属性 JSON | `data/datasets/dataset_properties.json` |
+| `--prediction_only` | 仅跑预测窗口分析 | 否 |
+| `--history_only` | 仅跑历史窗口分析 | 否 |
+| `--clean_only` | 跳过填补方法，只跑 clean 预测窗口 | 否 |
+| `--force` | 覆盖已有输出文件 | 否 |
+
+输出结构：
+```
+results_analysis/<model>/
+├── prediction/
+│   ├── {dataset}_clean_{term}_prediction.csv
+│   ├── {dataset}_clean_{term}_prediction_summary.json
+│   ├── {dataset}_{method}_{ratio}_{term}_{impute}_prediction.csv
+│   └── ...
+├── history/
+│   ├── {dataset}_clean_{term}_history.csv
+│   ├── {dataset}_{method}_{ratio}_{term}_{impute}_history.csv
+│   └── ...
+├── overall_prediction_summary.json
+└── overall_history_summary.json
+```
+
+### B. `run_clean_prediction_window_analysis.py` — 干净预测真实值窗口分析
+
+作用：在 `data/datasets/ori/<dataset>.csv` 尾部按 `inject_range_utils.get_injection_range` 给出的 `prediction_length × windows` 切出真值窗口（模型输出窗口对应的 Ground-Truth），对每个窗口计算 6 个 STL 指标。该切分与模型 `max_context` 无关，因此脚本不需要 `--model`。
+
+核心参数：
+
+| 参数 | 说明 | 默认值 |
+| --- | --- | --- |
+| `--dataset` | 一个或多个数据集名；省略则扫描 `data/datasets/ori/` 下全部 CSV | 全部 |
+| `--terms` | 一个或多个 term；省略则按 `dataset_properties.json` 的 `term` 字段自动选 | 自动 |
+| `--data_path` | 数据集根目录 | `data/datasets` |
+| `--properties_path` | 数据集属性 JSON | `data/datasets/dataset_properties.json` |
+| `--output_dir` | 结果输出目录 | `results_analysis/clean_prediction_windows` |
+| `--force` | 覆盖已有输出文件 | 否 |
+
+输出结构：
+```
+results_analysis/clean_prediction_windows/
+├── {dataset}_clean_{term}_prediction_gt.csv          # 每窗口指标明细
+├── {dataset}_clean_{term}_prediction_gt_summary.json # 元信息 + 均值/std/min/max
+└── overall_clean_prediction_summary.json             # 全局 + per-term 聚合
+```
+
+### C. `window_analysis.py` — 单次交互式分析
+
+通过 `mode` 子命令选择分析对象，适用于对单个目录或单个数据集做即席分析。
+
+| 子命令 | 关键参数 | 用途 |
+| --- | --- | --- |
+| `prediction` | `--prediction_dir`, `--output` | 分析单个预测窗口目录 |
+| `history` | `--dataset`, `--term`, `--output` | 分析单个数据集的干净历史窗口 |
+
+所有子命令共享全局参数：`--model`（必填）、`--data_path`、`--properties_path`、`--model_properties_path`、`--output_root`。
+
+---
+
+## 三、目录命名规范
+
+预测结果目录必须匹配以下两种模式之一，否则会被跳过：
+
+- **干净数据**：`{dataset}_clean_{term}_prediction/`
+- **填补数据**：`{dataset}_{method}_length{len}_{ratio}_{term}_prediction/{impute_method}/`
+  - `method` ∈ `MCAR | BM | TM | TVMR`
+  - `ratio` 为三位数百分比（`010` 表示 10%）
+  - `impute_method` ∈ `zero | mean | forward | backward | linear | nearest | spline | seasonal`
+
+---
+
+## 四、指标说明
+
+所有指标均基于各列独立 STL 分解 `(trend, seasonal, residual)`，再对同一窗口内的所有数值列取平均。
+
+1. **趋势强度 `trend_strength`**：`F_TS = max(0, 1 - Var(R) / Var(T + R))`，范围 [0, 1]。
+2. **趋势线性度 `trend_linearity`**：将趋势分量拟合 `T_t = β0 + β1·P1(t) + β2·P2(t)`，取 `β1`。>0 表上升。
+3. **季节强度 `seasonal_strength`**：`F_SS = max(0, 1 - Var(R) / Var(S + R))`，范围 [0, 1]。
+4. **季节相关性 `seasonal_correlation`**：截取整数个周期，所有季节段两两皮尔逊相关取均值，范围 [-1, 1]。
+5. **残差一阶自相关 `residual_autocorr_lag1`**：`F_RA = E[(R_t-R̄)(R_{t-1}-R̄)] / Var(R)`，范围 [-1, 1]。
+6. **谱熵 `spectral_entropy`**：`Σ log(PSD)`，衡量频谱复杂度，值越大频率越分散。
+
+实现见 [Analysis/metrics.py](metrics.py)。
+
+---
+
+## 五、注意事项
+
+- 运行前确保 `data/datasets/dataset_properties.json` 包含目标数据集的 `period`、`frequency` 和 `term` 配置。
+- STL 分解要求每列有效样本数 `>= 2 * period`，不足会跳过该列；若窗口内所有列都不满足，该窗口整体失败，终端显示 `[SKIP-DATA]` 或 `Insufficient data`。
+- `run_batch_analysis.py` 的模型 `max_context` 取自 [Eval/model_properties.json](../Eval/model_properties.json)，历史窗口的长度即由此决定。
+- `run_clean_prediction_window_analysis.py` 的窗口数仅取决于数据集总长、`prediction_length` 与 `MAX_WINDOW=20`（见 [inject_range_utils.py](../tools/Missing_Value_Injection/inject_range_utils.py)），不同模型的结果相同，因此无需区分模型目录。
+- `--force` 会覆盖已有文件；默认行为是跳过已存在结果。
