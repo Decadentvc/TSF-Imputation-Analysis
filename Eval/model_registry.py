@@ -30,22 +30,6 @@ except ImportError:
     )
 
 
-def _opt_str(raw: object, default: str) -> str:
-    return default if raw is None else str(raw)
-
-
-def _opt_int(raw: object, default: int) -> int:
-    if raw is None:
-        return default
-    if isinstance(raw, bool):
-        return int(raw)
-    if isinstance(raw, (int, float)):
-        return int(raw)
-    if isinstance(raw, (str, bytes)):
-        return int(raw)
-    raise TypeError(f"Cannot convert {type(raw).__name__} to int")
-
-
 def build_model_adapter(
     model: str,
     prediction_length: int,
