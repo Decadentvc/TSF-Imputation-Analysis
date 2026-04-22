@@ -118,6 +118,13 @@ def build_model_adapter(
             batch_size=batch_size,
             device=device,
             model_name=model_name or "Lefei/VisionTSpp",
+            model_name=model_name or "visiontspp-local",
+            model_size=_opt_str(kwargs.get("model_size"), "base").lower(),
+            context_length=_opt_int(kwargs.get("context_length"), 4000),
+            ckpt_dir=_opt_str(kwargs.get("ckpt_dir"), "./hf_models/VisionTSpp"),
+            num_patch_input=_opt_int(kwargs.get("num_patch_input"), 7),
+            padding_mode=_opt_str(kwargs.get("padding_mode"), "constant"),
+            max_vars_per_pass=_opt_int(kwargs.get("max_vars_per_pass"), 16),
         )
 
     raise ValueError(

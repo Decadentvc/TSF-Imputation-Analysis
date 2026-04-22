@@ -77,7 +77,7 @@ def check_and_impute_dataset(
         print(f"  ✓ Imputed dataset exists: {imputed_path}")
         return imputed_path
 
-    print("  [WARN] Imputed dataset not found, generating...")
+    print("  ⚠ Imputed dataset not found, generating...")
     impute_dataset(
         eval_data_path=eval_data_path,
         imputation_method=imputation_method,
@@ -221,7 +221,7 @@ def save_intermediate_predictions(
         output_file = output_dir / f"{eval_data_name}_prediction_{window_idx}.csv"
         df.to_csv(output_file, index=False)
 
-    print(f"  [OK] Intermediate predictions saved: {output_dir}")
+    print(f"  ✅ Intermediate predictions saved: {output_dir}")
 
 
 def _default_result_subdir(model: str, mode: str) -> str:
@@ -660,7 +660,7 @@ def main():
                 torch_dtype=args.torch_dtype,
             )
     except Exception as e:
-        print(f"\n[ERROR] Error during evaluation: {e}", file=sys.stderr)
+        print(f"\n❌ Error during evaluation: {e}", file=sys.stderr)
         import traceback
 
         traceback.print_exc()
