@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional, Protocol
 
@@ -400,7 +399,6 @@ class Kairos23mAdapter:
         except ImportError:
             from model.kairos_23m_forecastor import kairos_23m_forecastor
 
-        self._forecastor = kairos_23m_forecastor
         if self.quantile_levels is None:
             self.quantile_levels = DEFAULT_QUANTILE_LEVELS
         if self.model_name != "mldi-lab/Kairos_23m":
@@ -611,27 +609,12 @@ class Kairos50mAdapter:
 
 @dataclass
 class VisionTSppAdapter:
-    """VisionTS++ 适配器：直接调用 `visionts.VisionTSpp` 模型，输出 9 分位数预测。
-
-    参照 `Eval/visiontspp.py` 的推理流程：
-      1. 按 ckpt_dir / model_size 解析权重文件路径，缺失时通过 HuggingFace 下载
-      2. 构造 VisionTSpp 模型（quantile=True、color=True），在预测前调用
-         update_config(context_len, pred_len, periodicity, ...)
-      3. 输出 [median, quantile_list] 后合并为 9 分位数的 QuantileForecast
-    """
-
     prediction_length: int
-    num_samples: int = 100  # 为了统一接口保留（VisionTS++ 不使用采样）
+    num_samples: int = 100
     batch_size: int = 32
     device: str = "cpu"
     model_name: str = "visiontspp-local"
     quantile_levels: Optional[List[float]] = None
-    model_size: str = "base"
-    context_length: int = 4000
-    ckpt_dir: str = "./hf_models/VisionTSpp"
-    num_patch_input: int = 7
-    padding_mode: str = "constant"
-    max_vars_per_pass: int = 16
 
     def __post_init__(self):
         try:
@@ -683,16 +666,9 @@ class VisionTSppAdapter:
                 self.model_name,
             )
 
-        self._visionts_util = visionts_util
-        self.model = VisionTSpp(
-            arch,
-            ckpt_path=ckpt_path,
-            quantile=True,
-            clip_input=True,
-            complete_no_clip=False,
-            color=True,
-        ).to(self.device)
-        self.model.eval()
+    def predict(self, test_data_input) -> List[QuantileForecast]:
+        forecasts: List[QuantileForecast] = []
+        input_entries = [_extract_input_entry(x) for x in list(test_data_input)]
 
     # ---------------------------- helpers ---------------------------- #
 
@@ -885,21 +861,5 @@ class VisionTSppAdapter:
                     fc_quantiles.extend(
                         self._process_tensor(single_input, periodicity)
                     )
-
-        forecasts: List[QuantileForecast] = []
-        q_levels = self.quantile_levels or DEFAULT_QUANTILE_LEVELS
-        for raw_array, entry in zip(fc_quantiles, input_entries):
-            # raw_array shape: [9, nvars, pred_len]；单变量 nvars=1
-            forecast_array = raw_array[:, 0, :] if raw_array.ndim == 3 else raw_array
-            forecast_array = forecast_array[:, : self.prediction_length].astype(
-                np.float64
-            )
-            forecast_start_date = entry["start"] + len(entry["target"])
-            forecasts.append(
-                QuantileForecast(
-                    forecast_arrays=forecast_array,
-                    forecast_keys=list(map(str, q_levels)),
-                    start_date=forecast_start_date,
                 )
-            )
         return forecasts

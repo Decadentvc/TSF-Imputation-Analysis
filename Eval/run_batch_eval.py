@@ -130,6 +130,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--model",
         type=str,
         required=True,
+        choices=["sundial", "chronos2", "timesfm2p5"],
         help="Model type",
     )
     parser.add_argument("--model_name", type=str, default=None, help="Model checkpoint")
