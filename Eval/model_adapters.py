@@ -395,33 +395,7 @@ class Kairos23mAdapter:
     quantile_levels: Optional[List[float]] = None
 
     def __post_init__(self):
-<<<<<<< HEAD
         try:
-            from .model.kairos_23m_forecastor import kairos_23m_forecastor
-        except ImportError:
-            from model.kairos_23m_forecastor import kairos_23m_forecastor
-=======
-        try:
-            from tsfm.model.kairos import AutoModel as KairosAutoModel
-        except ImportError as exc:
-            raise ImportError(
-                "Kairos23mAdapter requires tsfm with kairos support. "
-                "Please install the official Kairos dependency."
-            ) from exc
-
-        try:
-            self._kairos_model = KairosAutoModel.from_pretrained(
-                self.model_name,
-                trust_remote_code=True,
-            )
-        except Exception as exc:
-            raise RuntimeError(
-                "Kairos_23m model load failed. Ensure Kairos/tsfm dependencies are installed "
-                "and provide a valid --model_name HF repo id."
-            ) from exc
-        self._kairos_model = self._kairos_model.to(self.device)
-        self._kairos_model.eval()
->>>>>>> 4b363ae983185f1ce151e3cc419529a001f6d12f
             from .model.kairos_23m_forecastor import kairos_23m_forecastor
         except ImportError:
             from model.kairos_23m_forecastor import kairos_23m_forecastor
@@ -429,14 +403,6 @@ class Kairos23mAdapter:
         self._forecastor = kairos_23m_forecastor
         if self.quantile_levels is None:
             self.quantile_levels = DEFAULT_QUANTILE_LEVELS
-<<<<<<< HEAD
-        if self.model_name != "mldi-lab/Kairos_23m":
-            logger.warning(
-                "Kairos23mAdapter currently ignores model_name=%s; using forecastor defaults.",
-                self.model_name,
-            )
-=======
->>>>>>> 4b363ae983185f1ce151e3cc419529a001f6d12f
         if self.model_name != "mldi-lab/Kairos_23m":
             logger.warning(
                 "Kairos23mAdapter currently ignores model_name=%s; using forecastor defaults.",
@@ -479,142 +445,6 @@ class Kairos23mAdapter:
             preds = getattr(outputs, "prediction_outputs", None)
 
         if preds is None:
-<<<<<<< HEAD
-=======
-            raise RuntimeError("Kairos_23m output missing prediction_outputs")
-
-        out_arr = preds.detach().cpu().float().numpy()
-        if out_arr.ndim != 3:
-            raise RuntimeError(
-                f"Kairos_23m prediction_outputs ndim must be 3, got {out_arr.ndim}"
-            )
-
-        if out_arr.shape[1] == self.prediction_length:
-            pass
-        elif out_arr.shape[2] == self.prediction_length:
-            out_arr = out_arr.transpose((0, 2, 1))
-        elif out_arr.shape[1] > self.prediction_length:
-            out_arr = out_arr[:, -self.prediction_length :, :]
-        elif out_arr.shape[2] > self.prediction_length:
-            out_arr = out_arr[:, :, -self.prediction_length :].transpose((0, 2, 1))
-        else:
-            raise RuntimeError(
-                "Kairos_23m generated horizon is shorter than prediction_length. "
-                f"output shape={out_arr.shape}, prediction_length={self.prediction_length}"
-            )
-        return out_arr
-
-    def predict(self, test_data_input) -> List[QuantileForecast]:
-        forecasts: List[QuantileForecast] = []
-        input_entries = [_extract_input_entry(x) for x in list(test_data_input)]
-
-        forecast_outputs: List[np.ndarray] = []
-        input_metadata = []
-        for batch in tqdm(batcher(input_entries, batch_size=self.batch_size)):
-            contexts = [torch.tensor(item["target"]) for item in batch]
-            batch_x = self._prepare_context(contexts)
-
-            if torch.isnan(batch_x).any():
-                arr = np.array(batch_x)
-                imputed_rows = [LastValueImputation()(row) for row in arr]
-                batch_x = torch.tensor(np.vstack(imputed_rows))
-
-            batch_x = batch_x.to(self.device)
-            out_arr = self._predict_with_kairos_model(batch_x)
-            forecast_outputs.append(out_arr)
-
-            for item in batch:
-                input_metadata.append(
-                    {
-                        "start": item["start"],
-                        "target_length": len(item["target"]),
-                    }
-                )
-
-        all_samples = np.concatenate(forecast_outputs, axis=0)
-        for item, meta in zip(all_samples, input_metadata):
-            forecast_start_date = meta["start"] + meta["target_length"]
-            forecasts.append(
-                QuantileForecast(
-                    forecast_arrays=item.transpose((1, 0)),
-                    forecast_keys=list(map(str, self.quantile_levels)),
-                    start_date=forecast_start_date,
-                )
-            )
-        return forecasts
-
-
-@dataclass
-class Kairos50mAdapter:
-    prediction_length: int
-    num_samples: int = 100
-    batch_size: int = 32
-    device: str = "cpu"
-    model_name: str = "mldi-lab/Kairos_50m"
-    quantile_levels: Optional[List[float]] = None
-
-    def __post_init__(self):
-        try:
-            from tsfm.model.kairos import AutoModel as KairosAutoModel
-        except ImportError as exc:
-            raise ImportError(
-                "Kairos50mAdapter requires tsfm with kairos support. "
-                "Please install the official Kairos dependency."
-            ) from exc
-
-        try:
-            self._kairos_model = KairosAutoModel.from_pretrained(
-                self.model_name,
-                trust_remote_code=True,
-            )
-        except Exception as exc:
-            raise RuntimeError(
-                "Kairos_50m model load failed. Ensure Kairos/tsfm dependencies are installed "
-                "and provide a valid --model_name HF repo id."
-            ) from exc
-        self._kairos_model = self._kairos_model.to(self.device)
-        self._kairos_model.eval()
-
-        if self.quantile_levels is None:
-            self.quantile_levels = DEFAULT_QUANTILE_LEVELS
-
-    @staticmethod
-    def _left_pad_and_stack_1d(tensors: List[torch.Tensor]) -> torch.Tensor:
-        max_len = max(len(c) for c in tensors)
-        padded = []
-        for c in tensors:
-            padding = torch.full(
-                size=(max_len - len(c),),
-                fill_value=torch.nan,
-                device=c.device,
-            )
-            padded.append(torch.concat((padding, c), dim=-1))
-        return torch.stack(padded)
-
-    def _prepare_context(self, context: Iterable[torch.Tensor]) -> torch.Tensor:
-        context = list(context)
-        batch_x = self._left_pad_and_stack_1d(context)
-        if batch_x.ndim == 1:
-            batch_x = batch_x.unsqueeze(0)
-        return batch_x
-
-    def _predict_with_kairos_model(self, batch_x: torch.Tensor) -> np.ndarray:
-        with torch.no_grad():
-            outputs = self._kairos_model(
-                past_target=batch_x,
-                prediction_length=self.prediction_length,
-                generation=True,
-                preserve_positivity=True,
-                average_with_flipped_input=True,
-            )
-
-        if isinstance(outputs, dict):
-            preds = outputs.get("prediction_outputs")
-        else:
-            preds = getattr(outputs, "prediction_outputs", None)
-
-        if preds is None:
->>>>>>> 4b363ae983185f1ce151e3cc419529a001f6d12f
             raise RuntimeError("Kairos_50m output missing prediction_outputs")
 
         out_arr = preds.detach().cpu().float().numpy()
@@ -642,7 +472,6 @@ class Kairos50mAdapter:
         forecasts: List[QuantileForecast] = []
         input_entries = [_extract_input_entry(x) for x in list(test_data_input)]
 
-<<<<<<< HEAD
         for batch in tqdm(batcher(input_entries, batch_size=self.batch_size)):
             for item in batch:
                 df_input, freq = _build_forecastor_input(item)
@@ -697,10 +526,6 @@ class Kairos50mAdapter:
     def predict(self, test_data_input) -> List[QuantileForecast]:
         forecasts: List[QuantileForecast] = []
         input_entries = [_extract_input_entry(x) for x in list(test_data_input)]
-=======
-        forecast_outputs: List[np.ndarray] = []
-        input_metadata = []
->>>>>>> 4b363ae983185f1ce151e3cc419529a001f6d12f
 
         for batch in tqdm(batcher(input_entries, batch_size=self.batch_size)):
             for item in batch:
@@ -717,7 +542,7 @@ class Kairos50mAdapter:
                 ).to_numpy(dtype=np.float64)
                 if point_prediction.shape[0] < self.prediction_length:
                     raise RuntimeError(
-                        "Kairos_23m returned fewer points than prediction_length."
+                        "Kairos_50m returned fewer points than prediction_length."
                     )
                 forecasts.append(
                     _to_deterministic_quantile_forecast(
@@ -740,58 +565,18 @@ class Kairos50mAdapter:
 
     def __post_init__(self):
         try:
-            from .model.kairos_50m_forecastor import kairos_50m_forecastor
+            from .model.timesfm_2p0_500m_forecastor import timesfm_2p0_500m_forecastor
         except ImportError:
-            from model.kairos_50m_forecastor import kairos_50m_forecastor
+            from model.timesfm_2p0_500m_forecastor import timesfm_2p0_500m_forecastor
 
-        self._forecastor = kairos_50m_forecastor
+        self._forecastor = timesfm_2p0_500m_forecastor
         if self.quantile_levels is None:
             self.quantile_levels = DEFAULT_QUANTILE_LEVELS
-
-    @staticmethod
-    def _extract_freq(item: Dict[str, Any]) -> str:
-        start = item.get("start")
-        freq = getattr(start, "freqstr", None)
-        if freq:
-            return freq
-        freq_obj = getattr(start, "freq", None)
-        return getattr(freq_obj, "freqstr", "H") or "H"
-
-    @staticmethod
-    def _freq_to_category(freq: str) -> int:
-        try:
-            base = pd.tseries.frequencies.to_offset(freq).name.upper()
-        except Exception:
-            base = str(freq).upper()
-
-        if base in {"W", "M"}:
-            return 1
-        if base in {"Q", "Y", "A"}:
-            return 2
-        return 0
-
-    @staticmethod
-    def _linear_impute_nan(values: np.ndarray) -> np.ndarray:
-        s = pd.Series(values, dtype=np.float32)
-        s = s.interpolate(method="linear", limit_direction="both").ffill().bfill()
-        return s.to_numpy(dtype=np.float32)
-
-    def _compose_forecast_arrays(self, full_preds_item: np.ndarray) -> np.ndarray:
-        levels = self.quantile_levels or DEFAULT_QUANTILE_LEVELS
-        mean_arr = full_preds_item[:, 0]
-
-        arrays: List[np.ndarray] = []
-        for level in levels:
-            col_idx = None
-            for idx, q in enumerate(self._model_quantiles):
-                if abs(q - float(level)) < 1e-6:
-                    col_idx = idx + 1
-                    break
-            if col_idx is None or col_idx >= full_preds_item.shape[1]:
-                arrays.append(mean_arr[: self.prediction_length])
-            else:
-                arrays.append(full_preds_item[: self.prediction_length, col_idx])
-        return np.stack(arrays, axis=0)
+        if self.model_name != "google/timesfm-2.0-500m-pytorch":
+            logger.warning(
+                "TimesFM2p0Adapter currently ignores model_name=%s; using forecastor defaults.",
+                self.model_name,
+            )
 
     def predict(self, test_data_input) -> List[QuantileForecast]:
         forecasts: List[QuantileForecast] = []
@@ -799,35 +584,21 @@ class Kairos50mAdapter:
 
         for batch in tqdm(batcher(input_entries, batch_size=self.batch_size)):
             for item in batch:
-                target = np.asarray(item["target"], dtype=np.float32).reshape(-1)
-                if target.shape[0] < 2:
-                    raise ValueError("TimesFM2p0Adapter requires at least 2 history points.")
-                if np.isnan(target).any():
-                    target = self._linear_impute_nan(target)
-                if self.max_context > 0 and target.shape[0] > self.max_context:
-                    target = target[-self.max_context :]
-
-                contexts.append(
-                    torch.tensor(target, dtype=torch.float32, device=self.device)
+                df_input, freq = _build_forecastor_input(item)
+                output_df = self._forecastor(
+                    dataframe=df_input,
+                    forecast_length=self.prediction_length,
+                    num_samples=self.num_samples,
+                    freq=freq,
+                    device=self.device,
                 )
-                freq_inputs.append(self._freq_to_category(self._extract_freq(item)))
-                batch_meta.append(item)
-
-            with torch.no_grad():
-                outputs = self._timesfm_model(
-                    past_values=contexts,
-                    freq=freq_inputs,
-                    return_dict=True,
-                )
-
-            full_predictions = outputs.full_predictions.detach().cpu().float().numpy()
-            if full_predictions.shape[1] < self.prediction_length:
-                raise RuntimeError(
-                    "TimesFM_2p0_500m returned fewer points than prediction_length."
-                )
-
-            for full_preds_item, item in zip(full_predictions, batch_meta):
-                forecast_arrays = self._compose_forecast_arrays(full_preds_item)
+                point_prediction = pd.to_numeric(
+                    output_df.iloc[:, -1], errors="coerce"
+                ).to_numpy(dtype=np.float64)
+                if point_prediction.shape[0] < self.prediction_length:
+                    raise RuntimeError(
+                        "TimesFM_2p0_500m returned fewer points than prediction_length."
+                    )
                 forecasts.append(
                     _to_deterministic_quantile_forecast(
                         point_prediction[: self.prediction_length],
@@ -864,7 +635,6 @@ class VisionTSppAdapter:
 
     def __post_init__(self):
         try:
-<<<<<<< HEAD
             from visionts import VisionTSpp
             import visionts.util as visionts_util
         except ImportError as exc:  # pragma: no cover
@@ -878,48 +648,10 @@ class VisionTSppAdapter:
             raise ImportError(
                 "huggingface_hub 未安装。请先安装: pip install huggingface_hub"
             ) from exc
-=======
-            from huggingface_hub import hf_hub_download
-            from visionts import VisionTSpp, freq_to_seasonality_list
-        except ImportError as exc:
-            raise ImportError(
-                "VisionTSppAdapter requires visionts and huggingface_hub. "
-                "Please install: pip install visionts huggingface_hub"
-            ) from exc
-
-        self._freq_to_seasonality_list = freq_to_seasonality_list
-
-        model_spec = (self.model_name or "").strip() or "Lefei/VisionTSpp"
-        model_spec = model_spec.replace("hf://", "")
-        if "::" in model_spec:
-            repo_id, ckpt_name = model_spec.split("::", 1)
-        else:
-            repo_id, ckpt_name = model_spec, "visiontspp_model.ckpt"
-        ckpt_name = ckpt_name.strip() or "visiontspp_model.ckpt"
-
-        try:
-            ckpt_path = hf_hub_download(repo_id=repo_id, filename=ckpt_name)
-        except Exception as exc:
-            raise RuntimeError(
-                f"VisionTS++ checkpoint download failed from repo '{repo_id}', file '{ckpt_name}'."
-            ) from exc
-
-        arch = "mae_large" if "large" in ckpt_name.lower() else "mae_base"
-        self._vision_model = VisionTSpp(
-            arch=arch,
-            ckpt_path=ckpt_path,
-            quantile=True,
-            clip_input=True,
-            complete_no_clip=False,
-            color=False,
-        ).to(self.device)
-        self._vision_model.eval()
->>>>>>> 4b363ae983185f1ce151e3cc419529a001f6d12f
 
         if self.quantile_levels is None:
             self.quantile_levels = DEFAULT_QUANTILE_LEVELS
 
-<<<<<<< HEAD
         size_key = str(self.model_size).lower()
         if size_key == "base":
             arch = "mae_base"
@@ -950,68 +682,6 @@ class VisionTSppAdapter:
                 "VisionTSppAdapter currently ignores model_name=%s; using local checkpoint.",
                 self.model_name,
             )
-=======
-    @staticmethod
-    def _extract_freq(item: Dict[str, Any]) -> str:
-        start = item.get("start")
-        freq = getattr(start, "freqstr", None)
-        if freq:
-            return freq
-        freq_obj = getattr(start, "freq", None)
-        return getattr(freq_obj, "freqstr", "H") or "H"
-
-    def _resolve_periodicity(self, freq: str) -> int:
-        try:
-            seasonalities = self._freq_to_seasonality_list(freq)
-        except Exception:
-            seasonalities = [1]
-        if not seasonalities:
-            return 1
-        return max(1, int(seasonalities[0]))
-
-    def _compose_quantile_forecast_arrays(self, outputs: Any) -> np.ndarray:
-        levels = self.quantile_levels or DEFAULT_QUANTILE_LEVELS
-
-        if isinstance(outputs, (list, tuple)):
-            median_tensor = outputs[0]
-            quantile_tensors = outputs[1] if len(outputs) > 1 else []
-        else:
-            median_tensor = outputs
-            quantile_tensors = []
-
-        median_arr = (
-            median_tensor.detach().cpu().float().numpy()[0, : self.prediction_length, 0]
-        )
-        quantile_map: Dict[str, np.ndarray] = {"0.5": median_arr}
-
-        if quantile_tensors:
-            q_arrays = [
-                q.detach().cpu().float().numpy()[0, : self.prediction_length, 0]
-                for q in quantile_tensors
-            ]
-            non_median_levels = [q for q in levels if float(q) != 0.5]
-            if len(q_arrays) == len(non_median_levels):
-                for q, arr in zip(non_median_levels, q_arrays):
-                    quantile_map[str(q)] = arr
-            elif len(q_arrays) == len(levels):
-                for q, arr in zip(levels, q_arrays):
-                    quantile_map[str(q)] = arr
-            else:
-                logger.warning(
-                    "VisionTS++ quantile output count (%s) does not match requested quantiles (%s). "
-                    "Falling back to median for missing levels.",
-                    len(q_arrays),
-                    len(levels),
-                )
-                for idx, q in enumerate(non_median_levels):
-                    if idx < len(q_arrays):
-                        quantile_map[str(q)] = q_arrays[idx]
-
-        arrays = [
-            quantile_map.get(str(q), median_arr)[: self.prediction_length] for q in levels
-        ]
-        return np.stack(arrays, axis=0)
->>>>>>> 4b363ae983185f1ce151e3cc419529a001f6d12f
 
         self._visionts_util = visionts_util
         self.model = VisionTSpp(
@@ -1024,7 +694,6 @@ class VisionTSppAdapter:
         ).to(self.device)
         self.model.eval()
 
-<<<<<<< HEAD
     # ---------------------------- helpers ---------------------------- #
 
     @staticmethod
@@ -1215,36 +884,6 @@ class VisionTSppAdapter:
                     single_input = item_tensor.unsqueeze(0).to(self.device)
                     fc_quantiles.extend(
                         self._process_tensor(single_input, periodicity)
-=======
-        for batch in tqdm(batcher(input_entries, batch_size=self.batch_size)):
-            for item in batch:
-                target = np.asarray(item["target"], dtype=np.float32).reshape(-1)
-                if target.shape[0] < 2:
-                    raise ValueError("VisionTSppAdapter requires at least 2 history points.")
-                if np.isnan(target).any():
-                    target = LastValueImputation()(target)
-
-                context = torch.tensor(target, dtype=torch.float32).reshape(1, -1, 1)
-                periodicity = self._resolve_periodicity(self._extract_freq(item))
-                self._vision_model.update_config(
-                    context_len=context.shape[1],
-                    pred_len=self.prediction_length,
-                    periodicity=periodicity,
-                )
-
-                with torch.no_grad():
-                    outputs = self._vision_model(context.to(self.device))
-                forecast_arrays = self._compose_quantile_forecast_arrays(outputs)
-                if forecast_arrays.shape[1] < self.prediction_length:
-                    raise RuntimeError(
-                        "VisionTSpp returned fewer points than prediction_length."
-                    )
-                forecasts.append(
-                    QuantileForecast(
-                        forecast_arrays=forecast_arrays,
-                        forecast_keys=list(map(str, self.quantile_levels)),
-                        start_date=item["start"] + len(item["target"]),
->>>>>>> 4b363ae983185f1ce151e3cc419529a001f6d12f
                     )
 
         forecasts: List[QuantileForecast] = []

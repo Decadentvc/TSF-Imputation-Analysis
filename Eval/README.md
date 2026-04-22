@@ -125,24 +125,11 @@ python Eval/run_batch_eval.py --model timesfm2p5 --dataset ETTh1 --force
 
 > 其中 `run_batch_eval.py` 当前限制为 `sundial` / `chronos2` / `timesfm2p5`。
 
-<<<<<<< HEAD
 ### 模型切换方式
 
 - 常规仅需切换 `--model`。
 - 如需指定权重或 checkpoint，使用 `--model_name`。
 - 通用参数（如 `--batch_size`、`--device`）对所有模型可传；不适用参数由适配层忽略或处理。
-=======
-- 只改命令行中的 `--model`，其余流程（数据加载、窗口生成、指标评估、结果保存）不需要改
-- 如需指定不同权重，使用 `--model_name`
-- 模型特有参数：
-  - `sundial`：主要使用 `--num_samples`
-  - `chronos2`：可用 `--predict_batches_jointly`、`--torch_dtype`
-  - `timesfm2p5`：通常只需 `--batch_size`、`--device`（`--model_name` 可覆盖默认 checkpoint）
-  - `kairos23m`：主要使用通用参数，默认 `--model_name mldi-lab/Kairos_23m`，通过远程仓库加载模型，不依赖本地 forecastor。
-  - `kairos50m`：主要使用通用参数，默认 `--model_name mldi-lab/Kairos_50m`，通过远程仓库加载模型，不依赖本地 forecastor。
-  - `timesfm2p0`：主要使用通用参数，默认 `--model_name google/timesfm-2.0-500m-pytorch`，已支持按 `prediction_length` 动态扩展 horizon（支持 long term）。
-  - `visiontspp`：主要使用通用参数，默认 `--model_name Lefei/VisionTSpp`，通过 Hugging Face 下载模型，不依赖本地 forecastor。
->>>>>>> 4b363ae983185f1ce151e3cc419529a001f6d12f
 
 ### 如何添加新模型
 
@@ -248,44 +235,7 @@ data/datasets/Imputed/{METHOD}/{METHOD}_{RATIO}/{dataset}_{METHOD}_{RATIO}_{term
 
 ## 七、注意事项
 
-<<<<<<< HEAD
 - `single` / `batch` 缺失评测必须使用有效填补方法，`none` 不允许。
 - `term` 需匹配数据集属性：`short` 或 `short,medium,long`（由 `dataset_properties.json` 的 `term` 字段决定）。
 - 自动预测长度依赖 `dataset_properties.json` 的 `frequency` 配置。
 - `run_batch_eval.py` 默认跳过已有结果，长任务续跑时无需手工筛选；全量重跑请加 `--force`。
-=======
-## 输出文件命名
-
-### clean
-
-- `results/<model>/clean/{dataset}_clean_{term}_results.csv`
-
-### impute
-
-- `results/<model>/impute/{impute_method}_{eval_name}_{term}_results.csv`
-
-### 中间预测
-
-- clean（无填补）：`data/Intermediate_Predictions/<model>/{eval_name}_prediction/{eval_name}_prediction_{window_idx}.csv`
-- impute（有填补）：`data/Intermediate_Predictions/<model>/{eval_name}_prediction/{imputation_method}/{eval_name}_prediction_{window_idx}.csv`
-
-## 依赖
-
-按模型场景安装依赖：
-
-- 通用：`numpy`, `pandas`, `torch`, `gluonts`, `transformers`, `tqdm`
-- `chronos2`：`chronos-forecasting>=2.1`
-- `timesfm2p5`：`timesfm`（需包含 `timesfm_2p5_torch`）
-- `kairos23m` / `kairos50m`：需要可用 `tsfm`（包含 `tsfm.model.kairos`）。
-- `timesfm2p0`：需要支持 TimesFM 的 `transformers` 版本（包含 `TimesFmModelForPrediction`）。
-- `visiontspp`：需要 `visionts` 与 `huggingface_hub`。
-
-如报 `ModuleNotFoundError`，请先在当前环境补齐依赖。
-
-## 常见注意事项
-
-- `single` 模式缺失数据评估必须提供 `--imputation_method`，且不能是 `none`
-- `batch` 模式默认不包含 `none` 填补方法
-- `term` 必须与数据任务匹配：`short` / `medium` / `long`
-- `dataset_properties.json` 必须包含对应数据集的 `frequency` 与 `term` 信息
->>>>>>> 4b363ae983185f1ce151e3cc419529a001f6d12f
