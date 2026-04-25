@@ -685,7 +685,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--model",
         nargs="+",
         required=True,
-        choices=["sundial", "chronos2", "timesfm2p5"],
+        choices=["sundial", "chronos2", "timesfm2p5", "timesfm2p0", "kairos23m", "kairos50m", "visiontspp"],
         help="One or more model names",
     )
     
