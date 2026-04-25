@@ -11,6 +11,9 @@ python Eval/run_eval.py clean --model timesfm2p5 --dataset ETTh1 --term short
 python Eval/run_eval.py single --model chronos2 --eval_data_path "data/datasets/Block_Missing/BM_010/ETTh1_BM_length50_010_short.csv" --imputation_method linear
 python Eval/run_eval.py batch --model sundial --dataset ETTh1 --method BM --missing_ratios "0.10,0.20,0.30" --imputation_methods "linear,mean,forward"
 python Eval/run_eval.py batch --model timesfm2p5 --dataset ETTh1 --method BM --imputation_methods "linear,mean"
+python Eval/run_batch_eval.py --model sundial --dataset ETTh1 --method BM --terms short,medium --missing_ratios 0.10,0.20 --imputation_methods linear,mean,forward
+python Eval/run_batch_eval.py --model chronos2 --method BM --terms short --imputation_methods linear --include_clean
+python Eval/run_batch_eval.py --model timesfm2p5 --dataset ETTh1 --clean_only
 ```
 
 ### 指令说明
@@ -18,7 +21,40 @@ python Eval/run_eval.py batch --model timesfm2p5 --dataset ETTh1 --method BM --i
 - `clean`：使用干净数据评估，`eval_data_path == clean_data_path`
 - `single`：评估单个缺失数据文件，必须传 `--imputation_method`（不允许 `none`）
 - `batch`：按缺失率、term、填补方法批量评估
+- `run_batch_eval.py`：批处理入口，支持任务级进度条与“结果已存在自动跳过”
 - 若未传 `--prediction_length`，会按 `frequency + term` 自动计算
+
+## 批处理入口（run_batch_eval.py）
+
+`Eval/run_batch_eval.py` 基于 `run_eval.py` 封装，适合长任务批量跑实验。
+
+核心能力：
+- 已存在结果自动跳过（默认开启）
+- 支持 `--force` 强制重跑
+- 支持 `--include_clean` 同时跑 clean 结果
+- 支持 `--clean_only` 仅跑 clean
+- 支持不传 `--dataset` 自动扫描 `data/datasets/ori/*.csv` 全量数据集
+
+常用指令：
+
+```bash
+# 单数据集，缺失评估（默认跳过已有结果）
+python Eval/run_batch_eval.py --model sundial --dataset ETTh1 --method BM --terms short,medium,long --missing_ratios 0.10,0.20,0.30 --imputation_methods linear,mean,forward
+
+# 全数据集（不传 --dataset），同时跑 clean + impute
+python Eval/run_batch_eval.py --model chronos2 --method BM --terms short --imputation_methods linear --include_clean
+
+# 仅 clean 评估
+python Eval/run_batch_eval.py --model timesfm2p0 --dataset ETTh1 --clean_only
+
+# 强制重跑（忽略已有结果）
+python Eval/run_batch_eval.py --model visiontspp --dataset ETTh1 --method BM --terms short --imputation_methods linear --force
+```
+
+说明：
+- `--terms` / `--imputation_methods` / `--missing_ratios` 支持空格和逗号混输（如 `short,medium` 或 `short medium`）
+- `--missing_ratios` 支持 `0.1` / `10` / `010` 三种写法（后两者按百分比解析）
+- `run_batch_eval.py` 内部会调用 `run_single_evaluation(...)` 与 `evaluate_clean(...)`，输出目录与命名规则与 `run_eval.py` 保持一致
 
 ## 可用模型与切换方式（放在指令说明后）
 
@@ -64,6 +100,7 @@ python Eval/run_eval.py batch --model timesfm2p5 --dataset ETTh1 --method BM --i
 ## 文件结构
 
 - `Eval/run_eval.py`：CLI 入口（`single` / `batch` / `clean`）
+- `Eval/run_batch_eval.py`：批处理入口（支持自动跳过已有结果）
 - `Eval/eval_pipeline.py`：通用评估管线
 - `Eval/model_registry.py`：模型注册与构建
 - `Eval/model_adapters.py`：模型适配器实现
@@ -114,6 +151,7 @@ python Eval/run_eval.py batch --model timesfm2p5 --dataset ETTh1 --method BM --i
 - `--model_name`：模型权重名称（可选）
 - `--base_data_dir`：数据根目录（默认 `data/datasets`）
 - `--properties_path`：属性文件（默认 `data/datasets/dataset_properties.json`）
+- `--model_properties_path`：模型属性文件（默认 `Eval/model_properties.json`，用于统一读取各模型 `max_context`）
 - `--output_dir`：结果输出目录（可选；默认按模型自动分流）
 - `--prediction_length`：预测长度（可选；不传则自动计算）
 - `--batch_size`：推理批次大小
