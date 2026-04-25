@@ -23,6 +23,37 @@ from model_registry import build_model_adapter
 
 
 ALLOWED_MISSING_METHODS = {"BM"}
+DEFAULT_MODEL_PROPERTIES_PATH = "Eval/model_properties.json"
+
+
+def load_model_properties(
+    model_properties_path: str = DEFAULT_MODEL_PROPERTIES_PATH,
+) -> Dict[str, Any]:
+    props_path = Path(model_properties_path)
+    if not props_path.exists():
+        raise FileNotFoundError(f"Model properties not found: {props_path}")
+    with open(props_path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def get_model_max_context(
+    model: str,
+    model_properties_path: str = DEFAULT_MODEL_PROPERTIES_PATH,
+) -> int:
+    model_props = load_model_properties(model_properties_path)
+    model_key = model.lower()
+    if model_key not in model_props:
+        available = ", ".join(sorted(model_props.keys()))
+        raise ValueError(
+            f"Model '{model}' not found in model properties. Available: {available}"
+        )
+
+    max_context = model_props[model_key].get("max_context")
+    if max_context is None:
+        raise ValueError(f"Model '{model}' missing required field: max_context")
+    if not isinstance(max_context, int) or max_context <= 0:
+        raise ValueError(f"Model '{model}' has invalid max_context: {max_context}")
+    return max_context
 
 
 def parse_eval_dataset_name(eval_path: str) -> Tuple[str, str]:
@@ -256,6 +287,7 @@ def run_single_evaluation(
     intermediate_dir: str = "data/Intermediate_Predictions",
     predict_batches_jointly: bool = False,
     torch_dtype: Optional[str] = None,
+    model_properties_path: str = DEFAULT_MODEL_PROPERTIES_PATH,
 ):
     eval_path = Path(eval_data_path)
     if not eval_path.exists():
@@ -288,6 +320,8 @@ def run_single_evaluation(
             imputed_data_dir=imputed_data_dir,
         )
 
+    max_context = get_model_max_context(model, model_properties_path)
+
     adapter = build_model_adapter(
         model=model,
         model_name=model_name,
@@ -297,6 +331,7 @@ def run_single_evaluation(
         num_samples=num_samples,
         predict_batches_jointly=predict_batches_jointly,
         torch_dtype=torch_dtype,
+        max_context=max_context,
     )
 
     # 若未显式指定 prediction_length，这里先用 pipeline 自动计算值再回写 adapter
@@ -361,6 +396,7 @@ def batch_evaluate(
     intermediate_dir: str = "data/Intermediate_Predictions",
     predict_batches_jointly: bool = False,
     torch_dtype: Optional[str] = None,
+    model_properties_path: str = DEFAULT_MODEL_PROPERTIES_PATH,
 ) -> List[Tuple[str, str, str, Dict[str, Any]]]:
     if imputation_methods is None:
         imputation_methods = [
@@ -387,6 +423,7 @@ def batch_evaluate(
     )
     clean_path = find_clean_dataset_path(dataset_name, base_data_dir)
     freq = get_frequency_from_properties(dataset_name, properties_path)
+    max_context = get_model_max_context(model, model_properties_path)
 
     eval_path_list = [p for p, _ in eval_paths]
     imputed_map = batch_check_and_impute(
@@ -411,6 +448,7 @@ def batch_evaluate(
                     num_samples=num_samples,
                     predict_batches_jointly=predict_batches_jointly,
                     torch_dtype=torch_dtype,
+                    max_context=max_context,
                 )
                 if prediction_length is None:
                     from eval_pipeline import compute_prediction_length, Term
@@ -467,12 +505,14 @@ def evaluate_clean(
     intermediate_dir: str = "data/Intermediate_Predictions",
     predict_batches_jointly: bool = False,
     torch_dtype: Optional[str] = None,
+    model_properties_path: str = DEFAULT_MODEL_PROPERTIES_PATH,
 ) -> Dict[str, Any]:
     clean_path = Path(base_data_dir) / "ori" / f"{dataset_name}.csv"
     if not clean_path.exists():
         raise FileNotFoundError(f"Clean dataset not found: {clean_path}")
 
     freq = get_frequency_from_properties(dataset_name, properties_path)
+    max_context = get_model_max_context(model, model_properties_path)
     adapter = build_model_adapter(
         model=model,
         model_name=model_name,
@@ -482,6 +522,7 @@ def evaluate_clean(
         num_samples=num_samples,
         predict_batches_jointly=predict_batches_jointly,
         torch_dtype=torch_dtype,
+        max_context=max_context,
     )
     if prediction_length is None:
         from eval_pipeline import compute_prediction_length, Term
@@ -552,6 +593,11 @@ def _build_parser() -> argparse.ArgumentParser:
         )
         p.add_argument("--predict_batches_jointly", action="store_true")
         p.add_argument("--torch_dtype", type=str, default=None)
+        p.add_argument(
+            "--model_properties_path",
+            type=str,
+            default=DEFAULT_MODEL_PROPERTIES_PATH,
+        )
 
     single = subparsers.add_parser("single", help="Evaluate single missing dataset")
     single.add_argument("--eval_data_path", type=str, required=True)
@@ -610,6 +656,7 @@ def main():
                 intermediate_dir=args.intermediate_dir,
                 predict_batches_jointly=args.predict_batches_jointly,
                 torch_dtype=args.torch_dtype,
+                model_properties_path=args.model_properties_path,
             )
         elif args.mode == "batch":
             missing_ratios = (
@@ -641,6 +688,7 @@ def main():
                 intermediate_dir=args.intermediate_dir,
                 predict_batches_jointly=args.predict_batches_jointly,
                 torch_dtype=args.torch_dtype,
+                model_properties_path=args.model_properties_path,
             )
         elif args.mode == "clean":
             evaluate_clean(
@@ -658,6 +706,7 @@ def main():
                 intermediate_dir=args.intermediate_dir,
                 predict_batches_jointly=args.predict_batches_jointly,
                 torch_dtype=args.torch_dtype,
+                model_properties_path=args.model_properties_path,
             )
     except Exception as e:
         print(f"\n[ERROR] Error during evaluation: {e}", file=sys.stderr)

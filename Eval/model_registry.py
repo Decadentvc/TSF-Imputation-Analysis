@@ -48,6 +48,7 @@ def build_model_adapter(
             batch_size=batch_size,
             device=device,
             model_name=model_name or "thuml/sundial-base-128m",
+            max_context=int(kwargs.get("max_context", 2880)),
         )
 
     if model_key == "chronos2":
@@ -58,6 +59,7 @@ def build_model_adapter(
             model_name=model_name or "amazon/chronos-2",
             predict_batches_jointly=bool(kwargs.get("predict_batches_jointly", False)),
             torch_dtype=kwargs.get("torch_dtype"),
+            max_context=int(kwargs.get("max_context", 8192)),
         )
 
     if model_key == "timesfm2p5":
@@ -66,6 +68,7 @@ def build_model_adapter(
             batch_size=batch_size,
             device=device,
             model_name=model_name or "google/timesfm-2.5-200m-pytorch",
+            max_context=int(kwargs.get("max_context", 4096)),
         )
 
     if model_key in {"kairos23m", "kairos_23m"}:
@@ -75,6 +78,7 @@ def build_model_adapter(
             batch_size=batch_size,
             device=device,
             model_name=model_name or "mldi-lab/Kairos_23m",
+            max_context=int(kwargs.get("max_context", 2048)),
         )
 
     if model_key in {"kairos50m", "kairos_50m"}:
@@ -84,6 +88,7 @@ def build_model_adapter(
             batch_size=batch_size,
             device=device,
             model_name=model_name or "mldi-lab/Kairos_50m",
+            max_context=int(kwargs.get("max_context", 2048)),
         )
 
     if model_key in {"timesfm2p0", "timesfm_2p0_500m", "timesfm2p0_500m"}:
@@ -93,6 +98,7 @@ def build_model_adapter(
             batch_size=batch_size,
             device=device,
             model_name=model_name or "google/timesfm-2.0-500m-pytorch",
+            max_context=int(kwargs.get("max_context", 2048)),
         )
 
     if model_key in {"visiontspp", "visionts++"}:
@@ -102,6 +108,7 @@ def build_model_adapter(
             batch_size=batch_size,
             device=device,
             model_name=model_name or "Lefei/VisionTSpp",
+            max_context=int(kwargs.get("max_context", 4000)),
         )
 
     raise ValueError(

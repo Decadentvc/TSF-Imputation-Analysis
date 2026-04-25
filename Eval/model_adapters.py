@@ -72,6 +72,7 @@ class SundialAdapter:
     batch_size: int = 32
     device: str = "cpu"
     model_name: str = "thuml/sundial-base-128m"
+    max_context: int = 2880
 
     def __post_init__(self):
         self.model = AutoModelForCausalLM.from_pretrained(
@@ -108,9 +109,7 @@ class SundialAdapter:
             return entry[0]
         return entry
 
-    def predict(
-        self, test_data_input, batch_x_shape: int = 2880
-    ) -> List[SampleForecast]:
+    def predict(self, test_data_input) -> List[SampleForecast]:
         forecast_outputs = []
         input_metadata = []
 
@@ -121,8 +120,8 @@ class SundialAdapter:
             ]
             batch_x = self._prepare_context(contexts)
 
-            if batch_x.shape[-1] > batch_x_shape:
-                batch_x = batch_x[..., -batch_x_shape:]
+            if self.max_context > 0 and batch_x.shape[-1] > self.max_context:
+                batch_x = batch_x[..., -self.max_context:]
 
             if torch.isnan(batch_x).any():
                 arr = np.array(batch_x)
@@ -392,6 +391,7 @@ class Kairos23mAdapter:
     device: str = "cpu"
     model_name: str = "mldi-lab/Kairos_23m"
     quantile_levels: Optional[List[float]] = None
+    max_context: int = 2048
 
     def __post_init__(self):
         try:
@@ -484,7 +484,12 @@ class Kairos23mAdapter:
         forecast_outputs: List[np.ndarray] = []
         input_metadata = []
         for batch in tqdm(batcher(input_entries, batch_size=self.batch_size)):
-            contexts = [torch.tensor(item["target"]) for item in batch]
+            contexts = []
+            for item in batch:
+                target = np.asarray(item["target"], dtype=np.float32).reshape(-1)
+                if self.max_context > 0 and target.shape[0] > self.max_context:
+                    target = target[-self.max_context :]
+                contexts.append(torch.tensor(target))
             batch_x = self._prepare_context(contexts)
 
             if torch.isnan(batch_x).any():
@@ -525,6 +530,7 @@ class Kairos50mAdapter:
     device: str = "cpu"
     model_name: str = "mldi-lab/Kairos_50m"
     quantile_levels: Optional[List[float]] = None
+    max_context: int = 2048
 
     def __post_init__(self):
         try:
@@ -618,7 +624,12 @@ class Kairos50mAdapter:
         input_metadata = []
 
         for batch in tqdm(batcher(input_entries, batch_size=self.batch_size)):
-            contexts = [torch.tensor(item["target"]) for item in batch]
+            contexts = []
+            for item in batch:
+                target = np.asarray(item["target"], dtype=np.float32).reshape(-1)
+                if self.max_context > 0 and target.shape[0] > self.max_context:
+                    target = target[-self.max_context :]
+                contexts.append(torch.tensor(target))
             batch_x = self._prepare_context(contexts)
 
             if torch.isnan(batch_x).any():
@@ -790,6 +801,7 @@ class VisionTSppAdapter:
     device: str = "cpu"
     model_name: str = "Lefei/VisionTSpp"
     quantile_levels: Optional[List[float]] = None
+    max_context: int = 4000
 
     def __post_init__(self):
         try:
@@ -900,6 +912,8 @@ class VisionTSppAdapter:
         for batch in tqdm(batcher(input_entries, batch_size=self.batch_size)):
             for item in batch:
                 target = np.asarray(item["target"], dtype=np.float32).reshape(-1)
+                if self.max_context > 0 and target.shape[0] > self.max_context:
+                    target = target[-self.max_context :]
                 if target.shape[0] < 2:
                     raise ValueError("VisionTSppAdapter requires at least 2 history points.")
                 if np.isnan(target).any():
