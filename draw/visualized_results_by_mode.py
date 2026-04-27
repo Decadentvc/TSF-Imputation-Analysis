@@ -460,7 +460,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--output",
         type=str,
         default=None,
-        help="Output image path. Default: draw/outputs/{model}/{prediction_mode}_window_gap_scatter.png",
+        help="Output image path. Default: draw/outputs_by_model/{model}/{prediction_mode}_window_gap_scatter.png",
     )
     return parser
 
@@ -479,7 +479,7 @@ def main() -> None:
     results_analysis_root = Path(args.results_analysis_dir)
     intermediate_root = Path(args.intermediate_dir)
     data_root = Path(args.data_dir)
-    default_out = Path("draw/outputs") / model / f"{prediction_mode}_window_gap_scatter.png"
+    default_out = Path("draw/outputs_by_model") / model / f"{prediction_mode}_window_gap_scatter.png"
     output_path = Path(args.output) if args.output else default_out
 
     df = build_plot_dataframe(

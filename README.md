@@ -125,6 +125,22 @@ python Eval/visualize_results.py --dataset ETTh1 --method BM --mode comparison \
 
 注意：该脚本仍残留 `MCAR/TM/TVMR` 选项与 `none` 默认值，是“4 维矩阵”时期的产物；实际场景传 `--method BM` 即可。
 
+窗口级散点分析脚本位于 `draw/`，现分为两类：
+
+```bash
+# 1) 按“填补方法”分图（原 draw/visualized_results.py，现已重命名）
+python draw/visualized_results_by_mode.py --model chronos2 --prediction_mode backward
+
+# 2) 按“数据集”分图（新增）
+python draw/visualized_results_by_dataset.py --model chronos2 \
+  --modes zero,mean,forward,backward,linear
+```
+
+默认输出目录：
+
+- 按填补方法分图：`draw/outputs_by_model/<model>/...`
+- 按数据集分图：`draw/outputs_by_dataset/<model>/...`
+
 ## 五、既有实验揭示的核心结论
 
 来自 `文档资料/_analysis_output.txt`：
