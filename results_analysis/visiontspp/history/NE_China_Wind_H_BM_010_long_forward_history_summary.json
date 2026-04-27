@@ -1,0 +1,56 @@
+{
+  "model": "visiontspp",
+  "dataset": "NE_China_Wind_H",
+  "method": "BM",
+  "ratio": 0.1,
+  "term": "long",
+  "imputation_method": "forward",
+  "n_windows": 8,
+  "period": 24,
+  "inject_range": {
+    "dataset_name": "NE_China_Wind_H",
+    "term": "long",
+    "frequency": "H",
+    "prediction_length": 720,
+    "windows": 8,
+    "max_context": 4000,
+    "start_index": 0,
+    "end_index": 8044,
+    "injection_length": 8044,
+    "total_length": 8764
+  },
+  "summary": {
+    "mean": {
+      "trend_strength": 0.9452785462781192,
+      "trend_linearity": -0.0002475216229300129,
+      "seasonal_strength": 0.09567909607842233,
+      "seasonal_correlation": 0.49149227881692115,
+      "residual_autocorr_lag1": 0.9202422561237564,
+      "spectral_entropy": 4993.2931731976805
+    },
+    "std": {
+      "trend_strength": 0.02104157463756948,
+      "trend_linearity": 0.0005712318177435273,
+      "seasonal_strength": 0.02103416234205216,
+      "seasonal_correlation": 0.062288674227120304,
+      "residual_autocorr_lag1": 0.011477016914158047,
+      "spectral_entropy": 1021.2072022362419
+    },
+    "min": {
+      "trend_strength": 0.899718607165375,
+      "trend_linearity": -0.000832728885182649,
+      "seasonal_strength": 0.062418652612244774,
+      "seasonal_correlation": 0.4059740974403879,
+      "residual_autocorr_lag1": 0.9051200953454511,
+      "spectral_entropy": 3073.792810476881
+    },
+    "max": {
+      "trend_strength": 0.9636494115528714,
+      "trend_linearity": 0.0006913874689475417,
+      "seasonal_strength": 0.1349774481572037,
+      "seasonal_correlation": 0.6130390057648885,
+      "residual_autocorr_lag1": 0.9405819694393631,
+      "spectral_entropy": 6551.450663057657
+    }
+  }
+}
