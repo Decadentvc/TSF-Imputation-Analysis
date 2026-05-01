@@ -12,6 +12,11 @@ import pandas as pd
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 from statsmodels.tsa.seasonal import STL
+
+try:
+    from Imputation.imputation_methods import IMPUTATION_METHODS
+except Exception:
+    IMPUTATION_METHODS = {}
 import sys
 import re
 
@@ -95,7 +100,11 @@ def is_imputation_method_dir(dirname: str) -> bool:
     
     填补方法名称: zero, mean, forward, backward, linear, nearest, spline, seasonal
     """
-    imputation_methods = ['zero', 'mean', 'forward', 'backward', 'linear', 'nearest', 'spline', 'seasonal']
+    imputation_methods = list(IMPUTATION_METHODS.keys()) or [
+        'zero', 'mean', 'forward', 'backward', 'linear', 'nearest', 'spline',
+        'seasonal', 'kalman_struct', 'kalman_arima', 'stl_kalman', 'gp_rbf',
+        'saits'
+    ]
     return dirname.lower() in imputation_methods
 
 

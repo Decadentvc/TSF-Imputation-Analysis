@@ -19,7 +19,7 @@ from typing import List, Dict, Optional
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from Imputation.imputation_methods import get_imputation_method
+from Imputation.imputation_methods import IMPUTATION_METHODS, get_imputation_method
 
 
 def load_windows_from_dir(input_dir: str) -> tuple:
@@ -66,6 +66,7 @@ def apply_imputation(
     method: str,
     data_cols: List[str],
     freq: Optional[str] = None,
+    random_seed: int = 42,
 ) -> pd.DataFrame:
     """
     对数据应用填补方法
@@ -81,6 +82,8 @@ def apply_imputation(
     """
     impute_func = get_imputation_method(method)
     
+    method = method.lower()
+
     if method == 'seasonal':
         if freq is None:
             raise ValueError("freq is required for seasonal imputation")
@@ -89,6 +92,8 @@ def apply_imputation(
         return impute_func(df, data_cols, order=3)
     elif method == 'polynomial':
         return impute_func(df, data_cols, order=2)
+    elif method in {'gp_rbf', 'saits'}:
+        return impute_func(df, data_cols, random_seed=random_seed)
     else:
         return impute_func(df, data_cols)
 
@@ -98,6 +103,7 @@ def run_imputation(
     method: str,
     output_dir: Optional[str] = None,
     freq: Optional[str] = None,
+    random_seed: int = 42,
 ) -> Path:
     """
     运行填补流程
@@ -144,11 +150,15 @@ def run_imputation(
             df_context = df.iloc[:context_length].copy()
             df_forecast = df.iloc[context_length:].copy()
             
-            df_context_imputed = apply_imputation(df_context, method, data_cols, freq)
+            df_context_imputed = apply_imputation(
+                df_context, method, data_cols, freq, random_seed=random_seed
+            )
             
             df_imputed = pd.concat([df_context_imputed, df_forecast])
         else:
-            df_imputed = apply_imputation(df, method, data_cols, freq)
+            df_imputed = apply_imputation(
+                df, method, data_cols, freq, random_seed=random_seed
+            )
         
         imputed_windows.append((df_imputed, window_info))
         
@@ -179,6 +189,7 @@ def run_imputation(
     imputed_meta = {
         **meta,
         "imputation_method": method,
+        "random_seed": random_seed,
         "imputed_at": datetime.now().isoformat(),
         "input_dir": str(input_dir),
     }
@@ -201,11 +212,14 @@ def main():
     parser.add_argument("--input_dir", type=str, required=True,
                         help="带缺失数据的目录路径")
     parser.add_argument("--method", type=str, required=True,
-                        help="填补方法 (zero, mean, forward, backward, linear, nearest, polynomial, spline, seasonal, none)")
+                        choices=sorted(IMPUTATION_METHODS.keys()),
+                        help="填补方法")
     parser.add_argument("--output_dir", type=str, default=None,
                         help="输出目录 (可选，默认为 input_dir 同级的 imputed/{method})")
     parser.add_argument("--freq", type=str, default=None,
                         help="数据频率 (某些方法需要，如 seasonal)")
+    parser.add_argument("--random_seed", type=int, default=42,
+                        help="随机数种子（用于 gp_rbf / saits 等随机方法）")
     
     args = parser.parse_args()
     
@@ -214,6 +228,7 @@ def main():
         method=args.method,
         output_dir=args.output_dir,
         freq=args.freq,
+        random_seed=args.random_seed,
     )
     
     print(f"\n输出目录: {output_dir}")

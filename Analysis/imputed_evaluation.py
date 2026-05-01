@@ -17,6 +17,7 @@ import pandas as pd
 from tqdm.auto import tqdm
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
+from Imputation.imputation_methods import IMPUTATION_METHODS
 
 
 def get_dataset_properties() -> Dict[str, Any]:
@@ -49,7 +50,8 @@ def parse_imputed_filename(filename: str) -> Optional[Dict[str, Any]]:
     Returns:
         解析后的字典，包含 dataset, method, ratio, term, imputation_method
     """
-    pattern = r'^([A-Za-z0-9\-_]+?)_(MCAR|BM|TM|TVMR)_(\d{3})_(short|medium|long)_(zero|mean|forward|backward|linear|nearest|spline|seasonal)\.csv$'
+    method_pattern = "|".join(sorted(re.escape(m) for m in IMPUTATION_METHODS.keys()))
+    pattern = rf'^([A-Za-z0-9\-_]+?)_(MCAR|BM|TM|TVMR)_(\d{{3}})_(short|medium|long)_({method_pattern})\.csv$'
     match = re.match(pattern, filename)
     if match:
         return {
