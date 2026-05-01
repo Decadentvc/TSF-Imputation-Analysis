@@ -1,171 +1,248 @@
 # TSF-Imputation-Analysis
 
-## 一、项目目标
+本仓库用于研究块状缺失（Block Missing, BM）场景下，不同缺失填补方法对时间序列基础预测模型（Time Series Foundation Models, TSFM）下游预测性能的影响。当前流程覆盖数据缺失注入、缺失数据填补、预测模型评估、窗口级结构特征分析和结果可视化。
 
-来自当前研究主线：
+核心实验链路是：
 
-- 研究维度：缺失模式 × 缺失程度 × 填补方法 × 时序基础模型
-- 核心问题：在块状缺失场景下，不同填补策略如何改变 TSFM 的预测性能，以及这种影响是否通过改变历史窗口的趋势、季节、频谱结构发生。
+```text
+原始时间序列 -> 块状缺失注入 -> 缺失填补 -> TSFM 预测 -> 指标评估与窗口特征分析 -> 可视化
+```
 
-## 二、当前实现与原设计的偏差
+## 仓库功能
 
-| 维度 | 根目录 README（已废弃）设想 | 代码实际支持 | 说明 |
-| --- | --- | --- | --- |
-| 缺失模式 | MCAR / BM / TM / TVMR | 仅 BM | `Eval/run_eval.py:25` 中 `ALLOWED_MISSING_METHODS={"BM"}`，`run_batch_eval.py --method` 也只允许 `BM` |
-| 缺失率 | 5%~30% | 10% / 20% / 30% | `data/datasets/BM/` 下只有 `BM_010/020/030` |
-| 块长度 | [1,3,5] | 固定 `length=50` | `tools/Missing_Value_Injection/BM.py` 默认 `block_length=50` |
-| 填补方法 | todo | 全部为统计/插值方法 | `Imputation/imputation_methods.py` 当前包含 `zero`、`mean`、`forward`、`backward`、`linear`、`nearest`、`polynomial`、`spline`、`seasonal`，没有深度填补器（如 `SAITS`、`BRITS`、`CSDI`） |
-| 基模 | todo | 已跑通 3 个，适配器多 4 个 | 已跑：`sundial`、`chronos2`、`timesfm2p5`；已适配但未跑：`kairos23m`、`kairos50m`、`timesfm2p0`、`visiontspp` |
-| 不填补基线 | —— | 被禁用 | `run_eval.py:281` 的 missing 场景下 `imputation_method` 不能为 `none`；但 `SundialAdapter` 内部对 `NaN` 用 `LastValueImputation` 静默兜底（`model_adapters.py:127`） |
+- 生成块状缺失数据：在指定预测任务的可评估区间内注入固定长度的连续缺失块。
+- 对缺失数据做填补：支持均值、前向、后向、线性插值，以及更多已注册的结构化/模型化填补方法。
+- 统一评估多个预测模型：通过同一套 `Eval/run_eval.py` 和 `Eval/run_batch_eval.py` 接入不同 TSFM。
+- 保存逐窗口预测结果：便于后续分析预测窗口与历史窗口之间的结构差异。
+- 分析时间序列结构特征：基于 STL 等方法计算趋势、季节性、残差自相关、频谱复杂度等窗口级指标。
+- 绘制实验散点图：比较结构扰动与预测误差退化之间的关系。
 
-另外，仓库里存在两套填补接口，职责重叠：
+## 当前已有结果的数据集
 
-1. `Imputation/impute.py`：基于窗口目录（`meta.json + window_XXX.csv`）的老版，没有被主流程使用。
-2. `Eval/impute_dataset.py`：基于完整 CSV 的新版，被 `run_eval.py` 实际调用；输出路径为 `data/datasets/Imputed/BM/BM_{ratio}/{dataset}_BM_{ratio}_{term}_{method}.csv`。
+仓库中原始数据集不止这些。README 只列出当前已经生成 BM 缺失数据并已有填补预测结果的数据集，位置主要在 `data/datasets/BM/BM_010`、`BM_020`、`BM_030` 和 `results/<model>/impute`。
 
-文件名不包含 `block_length`，未来如果研究多块长，会互相覆盖。
+已覆盖的数据集共 25 个：
 
-## 三、已产出数据规模
+`Australia_Solar_H`、`azure2019_U_5T`、`Coastal_T_S_15T`、`Coastal_T_S_20T`、`Coastal_T_S_5T`、`Coastal_T_S_H`、`current_velocity_15T`、`current_velocity_20T`、`current_velocity_5T`、`current_velocity_H`、`electricity`、`ETTh1`、`ETTh2`、`EWELD_Load_15T`、`exchange_rate`、`Finland_Traffic_15T`、`national_illness`、`NE_China_Wind_H`、`OpenElectricity_NEM_5T`、`Port_Activity_D`、`Supply_Chain_Customer_D`、`Supply_Chain_Location_D`、`traffic`、`Water_Quality_Darwin_15T`、`weather`。
 
-- 原始数据：27 个数据集，位于 `data/datasets/ori/`，覆盖 ETT 系列、`electricity`、`traffic`、`weather`、`exchange_rate`、`national_illness`，以及多域采样频率对照（`Coastal_T_S` / `current_velocity` 各含 `5T/15T/20T/H`）。
-- 注空数据：`data/datasets/BM/BM_{010,020,030}/`，`block_length=50`，`stratified` 模式。
-- 填补数据：`data/datasets/Imputed/BM/BM_{010,020,030}/`，共 5 类填补方法。
-- 评估结果：`results/{sundial,chronos2,timesfm2p5}/{clean,impute}/`。其中 `clean` 各 79 个，`impute` 中 `sundial` / `chronos2` 各 444 个，`timesfm2p5` 为 288 个。
-- 中间预测：`data/Intermediate_Predictions/<model>/<eval_name>_prediction/[<impute_method>/]window_*.csv`
-- 特征分析：`results_analysis/<model>/{prediction,history}/*.csv` 与 `overall_*_summary.json`；额外有 `results_analysis/clean_prediction_windows/` 保存 GT 窗口特征。
-- 统计透视：`文档资料/_analysis_output.txt`（676 行，已完成 3 模型 × 26 数据集聚合）以及 `块状缺失对长序列预测影响-实验结果统计.csv`。
+其中 `chronos2` 和 `sundial` 的 impute 结果覆盖上述 25 个数据集；`kairos23m`、`kairos50m`、`timesfm2p0`、`timesfm2p5`、`visiontspp` 的 impute 结果当前覆盖其中 24 个，缺少 `national_illness`。clean 基线结果中还包含 `ETTm1`、`ETTm2` 等数据集，但它们当前不属于已生成 BM 缺失并完成填补预测结果的主实验集合。
 
-## 四、端到端使用流程
+## 缺失注入方式
 
-- 工作根目录：`TSF-Imputation-Analysis`
-- 环境：参考 `TSFIA.yml`（`Python 3.10 + torch 2.11 + gluonts 0.16.2 + transformers 4.40.1 + timesfm 2.0 + statsmodels 0.14.6`）。
-- 额外依赖：`chronos-forecasting>=2.1`（用于 `chronos2`）与包含 `timesfm_2p5` 的 `timesfm` 版本。
+当前实验使用 BM（Block Missing，块状缺失）注入方式，代码位于 `tools/Missing_Value_Injection/BM.py`。
 
-### 步骤 1：注入块缺失
+- 缺失率：`10%`、`20%`、`30%`，对应目录 `BM_010`、`BM_020`、`BM_030`。
+- 缺失块长度：当前已有数据文件使用 `block_length=50`。
+- 注入模式：默认 `stratified`，会参考多个上下文长度区间（默认 `512,2048,2880,4096,8192`）尽量平衡不同模型上下文中的缺失率。
+- 作用列：跳过 `date/time/timestamp/item_id` 等时间或标识列，仅对数值列注入缺失。
+- 输出命名：`data/datasets/BM/BM_{ratio}/{dataset}_BM_length50_{ratio}_{term}.csv`。
 
-若 `data/datasets/BM/` 已存在，可跳过。
+示例：
 
 ```bash
-# 单数据集
-python tools/Missing_Value_Injection/BM.py --dataset ETTh1 --missing_ratio 0.1 --term long --no_auto_term
-
-# 批量
 python tools/Missing_Value_Injection/batch_bm_injection.py --missing_ratios 0.1,0.2,0.3 --block_length 50 --mode stratified
 ```
 
-输出：
+## 实现的填补算法
+
+填补算法集中注册在 `Imputation/imputation_methods.py`，主评估流程通过 `Eval/impute_dataset.py` 调用。
+
+当前已有预测结果主要使用 4 种填补方法：
+
+- `mean`：按列均值填补。
+- `forward`：前向填补。
+- `backward`：后向填补。
+- `linear`：线性插值。
+
+代码中还实现并注册了以下方法，可用于继续扩展实验：
+
+- `none`：不填补，保留 NaN。当前缺失数据评估流程不允许 `none` 作为正式 impute 分支。
+- `zero`：零值填补。
+- `nearest`：最近邻插值。
+- `polynomial`：多项式插值。
+- `spline`：样条插值。
+- `seasonal`：季节分解填补，失败时回退到线性插值。
+- `kalman_struct`：局部线性趋势状态空间模型 + Kalman smoother。
+- `kalman_arima`：AR(p) 状态空间近似 + Kalman smoother。
+- `stl_kalman`：STL/季节 profile 分解后对残差做 Kalman 填补。
+- `gp_rbf`：一维时间索引上的 RBF Gaussian Process 填补。
+- `saits`：基于 PyPOTS SAITS 的深度学习填补方法，需要额外安装 `pypots`。
+
+## 实现的预测算法
+
+预测模型统一通过 `Eval/model_adapters.py` 和 `Eval/model_registry.py` 适配，评估入口支持以下模型：
+
+- `sundial`：默认权重 `thuml/sundial-base-128m`。
+- `chronos2`：默认权重 `amazon/chronos-2`。
+- `timesfm2p5`：默认权重 `google/timesfm-2.5-200m-pytorch`。
+- `kairos23m`：默认权重 `mldi-lab/Kairos_23m`。
+- `kairos50m`：默认权重 `mldi-lab/Kairos_50m`。
+- `timesfm2p0`：默认权重 `google/timesfm-2.0-500m-pytorch`。
+- `visiontspp`：默认权重 `Lefei/VisionTSpp`。
+
+输出指标保存到 `results/<model>/clean` 和 `results/<model>/impute`。当前结果数量概览：
+
+| 模型 | clean 结果数 | impute 结果数 | impute 方法 |
+| --- | ---: | ---: | --- |
+| `chronos2` | 79 | 444 | `mean`, `forward`, `backward`, `linear` |
+| `sundial` | 79 | 444 | `mean`, `forward`, `backward`, `linear` |
+| `timesfm2p5` | 79 | 288 | `mean`, `forward`, `backward`, `linear` |
+| `kairos23m` | 26 | 288 | `mean`, `forward`, `backward`, `linear` |
+| `kairos50m` | 45 | 336 | `mean`, `forward`, `backward`, `linear` |
+| `timesfm2p0` | 26 | 288 | `mean`, `forward`, `backward`, `linear` |
+| `visiontspp` | 26 | 288 | `mean`, `forward`, `backward`, `linear` |
+
+## 目录结构
 
 ```text
-data/datasets/BM/BM_{ratio}/{dataset}_BM_length50_{ratio}_{term}.csv
+.
+├── Analysis/
+├── data/
+├── draw/
+├── Eval/
+├── Imputation/
+├── results/
+├── results_analysis/
+├── tools/
+├── 文档资料/
+├── TSFIA.yml
+└── README.md
 ```
 
-### 步骤 2：模型评估
+### `Analysis/`
 
-`run_eval.py` 会在评估前检查 `data/datasets/Imputed/...`，若缺失则调用 `impute_dataset` 自动生成。
+窗口级分析模块。
+
+- `metrics.py`：实现趋势强度、趋势线性度、季节强度、季节相关性、残差一阶自相关、频谱熵等特征指标。
+- `window_analysis.py`：对预测窗口、干净历史窗口、填补历史窗口做单次分析。
+- `run_batch_analysis.py`：按模型、term、填补方法批量分析预测窗口与历史窗口。
+- `run_clean_prediction_window_analysis.py`：生成 clean 预测窗口的对照特征。
+- `imputed_evaluation.py`：评估填补数据相对原始数据的误差。
+
+### `data/`
+
+数据与中间预测结果目录。
+
+- `data/datasets/ori/`：原始 CSV 数据集。
+- `data/datasets/BM/BM_010|BM_020|BM_030/`：已注入 BM 缺失的数据。
+- `data/datasets/Imputed/BM/BM_010|BM_020|BM_030/`：缺失数据经过不同填补方法处理后的 CSV。
+- `data/datasets/dataset_properties.json`：数据集频率、变量数、领域、预测周期类型、周期长度等元信息。
+- `data/Intermediate_Predictions/<model>/`：每个模型逐窗口预测结果，impute 场景下继续按填补方法分子目录。
+
+### `draw/`
+
+可视化脚本与输出图。
+
+- `visualized_results_by_mode.py`：按单个填补方法汇总所有数据集绘图。
+- `visualized_results_by_dataset.py`：按数据集绘图，在同一图中比较多个填补方法。
+- `outputs_by_model/`：按模型和填补方法组织的散点图与 CSV。
+- `outputs_by_dataset/`：按模型和数据集组织的散点图与 CSV。
+
+### `Eval/`
+
+预测评估主流程。
+
+- `run_eval.py`：统一 CLI 入口，支持 `clean`、`single`、`batch` 三种模式。
+- `run_batch_eval.py`：批量评估入口，支持跳过已有结果、强制重跑、只跑 clean、同时跑 clean 和 impute。
+- `eval_pipeline.py`：模型无关的评估管线，包括窗口构造、预测长度计算、指标计算和结果保存。
+- `model_adapters.py`：各预测模型的适配器。
+- `model_registry.py`：模型名称到适配器的注册逻辑。
+- `model_properties.json`：各模型最大上下文长度等属性。
+- `impute_dataset.py`：读取 BM 缺失文件，调用填补算法并保存填补后的数据。
+- `visualize_results.py`：旧版结果可视化入口。
+
+### `Imputation/`
+
+填补算法模块。
+
+- `imputation_methods.py`：所有填补函数和 `IMPUTATION_METHODS` 注册表。
+- `impute.py`：较早的窗口目录式填补接口，保留用于兼容旧流程。
+- `README.md`：填补方法说明。
+
+### `results/`
+
+预测评估指标输出目录，按模型拆分。
+
+- `results/<model>/clean/`：原始干净数据的预测结果。
+- `results/<model>/impute/`：BM 缺失数据先填补再预测的结果。
+
+结果文件通常包含 `MSE`、`MAE`、`sMAPE`、分位数预测相关指标等评估输出。
+
+### `results_analysis/`
+
+窗口特征分析输出目录。
+
+- `results_analysis/<model>/prediction/`：预测窗口特征分析。
+- `results_analysis/<model>/history/`：历史窗口特征分析。
+- `results_analysis/<model>/overall_*_summary.json`：按模型汇总的分析摘要。
+- `results_analysis/clean_prediction_windows/`：clean 预测窗口特征对照。
+
+### `tools/`
+
+工具脚本目录。
+
+- `tools/Missing_Value_Injection/BM.py`：单数据集 BM 注入入口。
+- `tools/Missing_Value_Injection/batch_bm_injection.py`：批量 BM 注入入口。
+- `tools/Missing_Value_Injection/inject_range_utils.py`：根据数据集属性和预测周期计算注入区间。
+- `tools/context_missing_ratio_report.py`：检查不同上下文区间内的缺失率。
+- `tools/missing_ratio_checker.py`：缺失率检查工具。
+
+### `文档资料/`
+
+论文、实验文档和阶段性分析材料。目前包含文献资料、实验报告草稿和相关 PDF。
+
+### 其他根目录文件
+
+- `TSFIA.yml`：Conda 环境配置文件。
+- `.gitignore`：Git 忽略规则。
+- `.vscode/`、`.idea/`：本地 IDE 配置。
+- `.kilo/`：本地工具相关目录，不属于核心实验代码。
+
+## 常用命令
+
+生成 BM 缺失数据：
 
 ```bash
-# 干净基线
-python Eval/run_eval.py clean --model sundial --dataset ETTh1 --term short
-
-# 单文件评估（指定填补方法）
-python Eval/run_eval.py single --model chronos2 \
-  --eval_data_path "data/datasets/BM/BM_010/ETTh1_BM_length50_010_short.csv" \
-  --imputation_method linear
-
-# 批量评估（推荐，支持断点续跑）
-python Eval/run_batch_eval.py --model sundial --dataset ETTh1 --method BM \
-  --terms short,medium,long \
-  --imputation_methods linear,mean,forward,backward \
-  --missing_ratios 0.1,0.2,0.3 \
-  --device cuda:0 --batch_size 32
+python tools/Missing_Value_Injection/batch_bm_injection.py --missing_ratios 0.1,0.2,0.3 --block_length 50 --mode stratified
 ```
 
-说明：
-
-- 若省略 `--dataset`，则会遍历 `data/datasets/ori/` 下全部数据集。
-- `--include_clean` 会同时跑 `clean`。
-- `--clean_only` 仅跑 `clean`。
-- `--force` 忽略已有结果。
-
-输出：
-
-- 指标 CSV：`results/<model>/{clean,impute}/*.csv`
-- 逐窗口中间预测：`data/Intermediate_Predictions/<model>/<eval_name>_prediction/[<method>/]`
-
-### 步骤 3：窗口特征与填补质量分析
+运行 clean 基线：
 
 ```bash
-# 预测窗口 + 历史窗口的 6 项 STL 特征（按模型批量）
-python Analysis/run_batch_analysis.py --model sundial chronos2 timesfm2p5 \
-  --terms short,medium,long \
-  --imputation_methods linear,mean,forward,backward
-
-# 干净 GT 窗口特征（作为对照）
-python Analysis/run_clean_prediction_window_analysis.py --terms short,medium,long
-
-# 填补保真度（整段比较，未区分 masked-only）
-python Analysis/imputed_evaluation.py --output_dir results_analysis/imputed_evaluation
+python Eval/run_eval.py clean --model chronos2 --dataset ETTh1 --term short
 ```
 
-输出：
-
-- `results_analysis/<model>/{prediction,history}/<combo>.csv` 与对应 `_summary.json`
-- `results_analysis/<model>/overall_{prediction,history}_summary.json`
-- `results_analysis/clean_prediction_windows/`
-- `results_analysis/imputed_evaluation/*.json`
-
-### 步骤 4：可视化
-
-旧脚本位于 `Eval/visualize_results.py`：
+运行单个缺失文件的填补预测：
 
 ```bash
-python Eval/visualize_results.py --dataset ETTh1 --method BM --mode comparison \
-  --imputation_methods none zero mean linear --format_mode new
+python Eval/run_eval.py single --model chronos2 --eval_data_path data/datasets/BM/BM_010/ETTh1_BM_length50_010_short.csv --imputation_method linear
 ```
 
-注意：该脚本仍残留 `MCAR/TM/TVMR` 选项与 `none` 默认值，是“4 维矩阵”时期的产物；实际场景传 `--method BM` 即可。
-
-窗口级散点分析脚本位于 `draw/`，现分为两类：
+批量运行缺失填补预测：
 
 ```bash
-# 1) 按“填补方法”分图（原 draw/visualized_results.py，现已重命名）
-python draw/visualized_results_by_mode.py --model chronos2 --prediction_mode backward
-
-# 2) 按“数据集”分图（新增）
-python draw/visualized_results_by_dataset.py --model chronos2 \
-  --modes zero,mean,forward,backward,linear
+python Eval/run_batch_eval.py --model sundial --dataset ETTh1 --method BM --terms short,medium,long --missing_ratios 0.1,0.2,0.3 --imputation_methods mean,forward,backward,linear
 ```
 
-默认输出目录：
+运行窗口特征分析：
 
-- 按填补方法分图：`draw/outputs_by_model/<model>/...`
-- 按数据集分图：`draw/outputs_by_dataset/<model>/...`
+```bash
+python Analysis/run_batch_analysis.py --model sundial chronos2 timesfm2p5 --terms short,medium,long --imputation_methods mean,forward,backward,linear
+```
 
-## 五、既有实验揭示的核心结论
+绘制按数据集比较的散点图：
 
-来自 `文档资料/_analysis_output.txt`：
+```bash
+python draw/visualized_results_by_dataset.py --model chronos2 --modes mean,forward,backward,linear
+```
 
-1. 填补 `SMAPE` 与预测 `MSE` 的组内 `Spearman` 平均 `ρ=0.704`。在 156 个 `model × dataset × ratio` 分组中，89.7% 为正相关，说明填补越准，预测通常越好。
-2. “填补冠军 = 预测冠军”的命中率为 66.7%，“预测垫底 = 填补垫底”的一致率为 74.4%。
-3. 均值填补最差：在 47.4% 的组合中成为预测垫底；`Sundial × 均值 × 30%` 的平均退化率达到 80%。
-4. 线性插值最稳：`chronos2`、`sundial`、`timesfm2p5` 的线性方法退化率均最低，其中 `sundial` 在 20% 缺失率时仅退化 2.6%。
-5. 结构扰动相关性明显：`Sundial` 的 `|Δtrend_linearity|` 与预测退化之间 `ρ=0.757`，显著高于另外两个模型，支持“结构漂移作为中介变量”的假设。
-6. 跨模型偏好并不一致：55.6% 的 `(dataset, ratio)` 组合中，3 个模型分别选出了不同的最佳填补方法。
+## 环境
 
-## 六、主要风险与尚未补齐的工程点
+推荐使用根目录 `TSFIA.yml` 创建环境：
 
-1. `BM.py:230` 使用 Python 内置 `hash()` 生成 `seed` 偏移，跨进程不稳定，复现性存在风险。
-2. `impute_dataset.py` 生成填补文件名时没有保留 `block_length`，未来多块长实验会互相覆盖。
-3. `imputed_evaluation.py:236` 是整段比较而不是 `masked-only`，会稀释真实填补误差。
-4. `metrics.py:186` 的 `spectral_entropy` 实现是 `Σ log(PSD)`，不是归一化谱熵，跨数据集不可比。
-5. `SundialAdapter` 对 `NaN` 做了静默 `LastValueImputation` 兜底；如果要做“不填补 passthrough”基线，必须关闭或显式暴露该行为。
-6. `eval_pipeline.py:156` 按列拆 `series` 后再平均，本质上是单变量预测结果的逐列均值；论文中应避免直接表述为 “multivariate forecasting”。
-7. `results_analysis/<model>/overall_prediction_summary.json` 中 `imputed_combinations=0` 与实际存在的 imputed 分析文件不一致，暂时不能作为总汇总依据。
+```bash
+conda env create -f TSFIA.yml
+conda activate TSFIA
+```
 
-## 七、建议的下一步
-
-1. 先把 `block_length` 写入填补文件名与结果路径，打开多块长对照实验。
-2. 在 `imputation_methods.py` 中加入至少一个深度填补器（如 `SAITS` 或 `BRITS`），并允许 `none` 作为 passthrough 基线。
-3. 将 `imputed_evaluation` 拆分为 `masked-only / unmasked` 两组指标。
-4. 在 `Sundial / Chronos2` 层面暴露“是否禁用内部 NaN 兜底”的开关。
-5. 固化 BM 随机种子，去除 `hash()` 依赖，并为每个注空配置记录至少 3 个 `seed`，以支持显著性检验。
+不同预测模型有额外依赖要求，例如 `chronos2` 需要 `chronos-forecasting`，`timesfm2p5` 需要包含 TimesFM 2.5 的 `timesfm`，`visiontspp` 需要 `visionts` 和 `huggingface_hub`，`saits` 填补需要 `pypots`。
