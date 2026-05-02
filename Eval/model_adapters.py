@@ -75,6 +75,30 @@ class SundialAdapter:
     max_context: int = 2880
 
     def __post_init__(self):
+        # 兼容 transformers>=4.42：sundial 远端代码使用了已被移除的旧 cache API。
+        # 通过 monkey-patch 给 DynamicCache 回填 seen_tokens / get_max_length /
+        # get_usable_length，避免 AttributeError。
+        try:
+            from transformers.cache_utils import DynamicCache
+
+            if not hasattr(DynamicCache, "seen_tokens"):
+                DynamicCache.seen_tokens = property(
+                    lambda self: self.get_seq_length()
+                )
+            if not hasattr(DynamicCache, "get_max_length"):
+                if hasattr(DynamicCache, "get_max_cache_shape"):
+                    DynamicCache.get_max_length = (
+                        lambda self: self.get_max_cache_shape()
+                    )
+                else:
+                    DynamicCache.get_max_length = lambda self: None
+            if not hasattr(DynamicCache, "get_usable_length"):
+                DynamicCache.get_usable_length = (
+                    lambda self, new_seq_length=None, layer_idx=0: self.get_seq_length(layer_idx)
+                )
+        except Exception:
+            pass
+
         self.model = AutoModelForCausalLM.from_pretrained(
             self.model_name,
             trust_remote_code=True,
@@ -300,19 +324,40 @@ class TimesFM2p5Adapter:
             )
         except Exception as pretrained_exc:
             logger.warning(
-                "TimesFM from_pretrained failed, fallback to load_checkpoint: %s",
+                "TimesFM from_pretrained failed, fallback to manual load: %s",
                 pretrained_exc,
             )
-            self.tfm = timesfm_2p5_torch.TimesFM_2p5_200M_torch()
             try:
-                self.tfm.load_checkpoint(repo_id=self.model_name)
-            except TypeError:
-                self.tfm.load_checkpoint()
-                if self.model_name != "google/timesfm-2.5-200m-pytorch":
-                    logger.warning(
-                        "Current timesfm version ignores model_name=%s in load_checkpoint().",
-                        self.model_name,
-                    )
+                from huggingface_hub import hf_hub_download
+
+                weights_filename = getattr(
+                    timesfm_pkg.TimesFM_2p5_200M_torch,
+                    "WEIGHTS_FILENAME",
+                    "model.safetensors",
+                )
+                weights_path = hf_hub_download(
+                    repo_id=self.model_name,
+                    filename=weights_filename,
+                )
+                self.tfm = timesfm_pkg.TimesFM_2p5_200M_torch(torch_compile=True)
+                self.tfm.model.load_checkpoint(
+                    weights_path, torch_compile=self.tfm.torch_compile
+                )
+            except Exception as manual_exc:
+                logger.warning(
+                    "TimesFM manual load failed, fallback to default load_checkpoint: %s",
+                    manual_exc,
+                )
+                self.tfm = timesfm_2p5_torch.TimesFM_2p5_200M_torch()
+                try:
+                    self.tfm.load_checkpoint(repo_id=self.model_name)
+                except TypeError:
+                    self.tfm.load_checkpoint()
+                    if self.model_name != "google/timesfm-2.5-200m-pytorch":
+                        logger.warning(
+                            "Current timesfm version ignores model_name=%s in load_checkpoint().",
+                            self.model_name,
+                        )
         self.quantiles = list(np.arange(1, 10) / 10.0)
 
     @staticmethod

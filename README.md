@@ -27,6 +27,8 @@
 
 其中 `chronos2` 和 `sundial` 的 impute 结果覆盖上述 25 个数据集；`kairos23m`、`kairos50m`、`timesfm2p0`、`timesfm2p5`、`visiontspp` 的 impute 结果当前覆盖其中 24 个，缺少 `national_illness`。clean 基线结果中还包含 `ETTm1`、`ETTm2` 等数据集，但它们当前不属于已生成 BM 缺失并完成填补预测结果的主实验集合。
 
+`kalman_struct`、`kalman_arima`、`gp_rbf`、`saits` 这 4 个新填补方法的预测结果当前覆盖 `chronos2`、`timesfm2p5`、`kairos23m`、`kairos50m`、`timesfm2p0`、`visiontspp` 共 6 个模型，与每个模型现有 `mean / forward / backward / linear` 的覆盖范围严格对齐。`sundial` 因 `transformers` 兼容性问题暂未补齐这 4 个方法（详见下文模型概览表的备注）。
+
 ## 缺失注入方式
 
 当前实验使用 BM（Block Missing，块状缺失）注入方式，代码位于 `tools/Missing_Value_Injection/BM.py`。
@@ -47,12 +49,14 @@ python tools/Missing_Value_Injection/batch_bm_injection.py --missing_ratios 0.1,
 
 填补算法集中注册在 `Imputation/imputation_methods.py`，主评估流程通过 `Eval/impute_dataset.py` 调用。
 
-当前已有预测结果主要使用 4 种填补方法：
+当前已有预测结果使用 8 种填补方法：
 
-- `mean`：按列均值填补。
-- `forward`：前向填补。
-- `backward`：后向填补。
-- `linear`：线性插值。
+- 基线 4 种：`mean`（按列均值）、`forward`（前向）、`backward`（后向）、`linear`（线性插值）。
+- 结构化/模型化 4 种：
+  - `kalman_struct`：局部线性趋势状态空间模型 + Kalman smoother。
+  - `kalman_arima`：AR(p) 状态空间近似 + Kalman smoother。
+  - `gp_rbf`：一维时间索引上的 RBF Gaussian Process 填补。
+  - `saits`：基于 PyPOTS SAITS 的深度学习填补方法（依赖 `pypots`）。
 
 代码中还实现并注册了以下方法，可用于继续扩展实验：
 
@@ -62,11 +66,7 @@ python tools/Missing_Value_Injection/batch_bm_injection.py --missing_ratios 0.1,
 - `polynomial`：多项式插值。
 - `spline`：样条插值。
 - `seasonal`：季节分解填补，失败时回退到线性插值。
-- `kalman_struct`：局部线性趋势状态空间模型 + Kalman smoother。
-- `kalman_arima`：AR(p) 状态空间近似 + Kalman smoother。
 - `stl_kalman`：STL/季节 profile 分解后对残差做 Kalman 填补。
-- `gp_rbf`：一维时间索引上的 RBF Gaussian Process 填补。
-- `saits`：基于 PyPOTS SAITS 的深度学习填补方法，需要额外安装 `pypots`。
 
 ## 实现的预测算法
 
@@ -84,13 +84,17 @@ python tools/Missing_Value_Injection/batch_bm_injection.py --missing_ratios 0.1,
 
 | 模型 | clean 结果数 | impute 结果数 | impute 方法 |
 | --- | ---: | ---: | --- |
-| `chronos2` | 79 | 444 | `mean`, `forward`, `backward`, `linear` |
+| `chronos2` | 79 | 888 | `mean`, `forward`, `backward`, `linear`, `kalman_struct`, `kalman_arima`, `gp_rbf`, `saits` |
 | `sundial` | 79 | 444 | `mean`, `forward`, `backward`, `linear` |
-| `timesfm2p5` | 79 | 288 | `mean`, `forward`, `backward`, `linear` |
-| `kairos23m` | 26 | 288 | `mean`, `forward`, `backward`, `linear` |
-| `kairos50m` | 45 | 336 | `mean`, `forward`, `backward`, `linear` |
-| `timesfm2p0` | 26 | 288 | `mean`, `forward`, `backward`, `linear` |
-| `visiontspp` | 26 | 288 | `mean`, `forward`, `backward`, `linear` |
+| `timesfm2p5` | 79 | 576 | `mean`, `forward`, `backward`, `linear`, `kalman_struct`, `kalman_arima`, `gp_rbf`, `saits` |
+| `kairos23m` | 26 | 576 | `mean`, `forward`, `backward`, `linear`, `kalman_struct`, `kalman_arima`, `gp_rbf`, `saits` |
+| `kairos50m` | 45 | 672 | `mean`, `forward`, `backward`, `linear`, `kalman_struct`, `kalman_arima`, `gp_rbf`, `saits` |
+| `timesfm2p0` | 26 | 576 | `mean`, `forward`, `backward`, `linear`, `kalman_struct`, `kalman_arima`, `gp_rbf`, `saits` |
+| `visiontspp` | 26 | 576 | `mean`, `forward`, `backward`, `linear`, `kalman_struct`, `kalman_arima`, `gp_rbf`, `saits` |
+
+> 备注：`sundial` 暂未跑出 `kalman_struct / kalman_arima / gp_rbf / saits` 这 4 个新填补方法的预测结果，原因是当前环境 `transformers 4.57` 与
+> Hugging Face 上 `thuml/sundial-base-128m` 远端 `modeling_sundial.py` 的 `_prepare_4d_causal_attention_mask` 调用存在张量形状错配，
+> 不属于简单的 cache API 兼容问题，需要降级 `transformers` 或修改 sundial 远端代码（待用户确认方案）。
 
 ## 目录结构
 
@@ -176,6 +180,7 @@ python tools/Missing_Value_Injection/batch_bm_injection.py --missing_ratios 0.1,
 - `results_analysis/<model>/history/`：历史窗口特征分析。
 - `results_analysis/<model>/overall_*_summary.json`：按模型汇总的分析摘要。
 - `results_analysis/clean_prediction_windows/`：clean 预测窗口特征对照。
+- `results_analysis/块状缺失对长序列预测影响-实验结果统计-0501.csv`：人工汇总的实验结果统计表，按 `(模型, 数据集, 缺失率, 填补方法)` 组织 long term 的预测误差（MSE[0.5]/sMAPE[0.5]）和回顾窗口 STL 6 项指标。新增的 4 个填补方法（`kalman_struct / kalman_arima / gp_rbf / saits`）已写入预测误差列；STL 6 列依赖 `Analysis/run_batch_analysis.py --history_only` 跑出的 `<model>/history/<...>_summary.json`，目前仅 `chronos2/Australia_Solar_H` 一个数据集已就绪，其余条目暂留空，可在 Analysis 跑完后用 `tools/append_new_imputers_to_csv.py --write` 重新回填。
 
 ### `tools/`
 
@@ -183,6 +188,8 @@ python tools/Missing_Value_Injection/batch_bm_injection.py --missing_ratios 0.1,
 
 - `tools/Missing_Value_Injection/BM.py`：单数据集 BM 注入入口。
 - `tools/Missing_Value_Injection/batch_bm_injection.py`：批量 BM 注入入口。
+- `tools/run_new_imputers_driver.py`：在每个模型现有 mean 结果覆盖范围上，调用 `Eval/run_eval.py` 增量补跑指定填补方法，自动跳过已生成的结果。
+- `tools/append_new_imputers_to_csv.py`：把 `kalman_struct / kalman_arima / gp_rbf / saits` 的实验结果按现有 CSV 的格式追加进 `results_analysis/块状缺失对长序列预测影响-实验结果统计-0501.csv`。默认 dry-run，加 `--write` 才真正写入；若 history summary 已存在会自动填入 STL 6 列。
 - `tools/Missing_Value_Injection/inject_range_utils.py`：根据数据集属性和预测周期计算注入区间。
 - `tools/context_missing_ratio_report.py`：检查不同上下文区间内的缺失率。
 - `tools/missing_ratio_checker.py`：缺失率检查工具。
@@ -222,6 +229,12 @@ python Eval/run_eval.py single --model chronos2 --eval_data_path data/datasets/B
 
 ```bash
 python Eval/run_batch_eval.py --model sundial --dataset ETTh1 --method BM --terms short,medium,long --missing_ratios 0.1,0.2,0.3 --imputation_methods mean,forward,backward,linear
+```
+
+按现有 `mean` 结果的覆盖批量补跑某些填补方法（保持与基线 4 种 imputer 的覆盖严格一致）：
+
+```bash
+python tools/run_new_imputers_driver.py --model chronos2 --imputation_methods kalman_struct,kalman_arima,gp_rbf,saits --device cuda
 ```
 
 运行窗口特征分析：
