@@ -37,6 +37,7 @@ CSV_PATH = (
 )
 
 TARGET_MODELS = [
+    "sundial",
     "chronos2",
     "timesfm2p5",
     "kairos23m",
@@ -125,6 +126,7 @@ def build_new_row(
     keep_ratio_col: bool,
     repo_root: Path,
     has_trailing_comma: bool,
+    layout: str = "compact",
 ) -> Optional[List[str]]:
     ratio_3d = RATIO_FLOAT_TO_3D[ratio_float]
     bm_dir = repo_root / "data" / "datasets" / "BM" / f"BM_{ratio_3d}"
@@ -155,18 +157,35 @@ def build_new_row(
     if stl_values is None:
         stl_values = ["", "", "", "", "", ""]
 
-    fields = [
-        "",  # col 1 model（不重复）
-        "",  # col 2 dataset（不重复，因为这些新 imputer 行不是块内首行）
-        "",  # col 3 ratio（不重复）
-        imputer,  # col 4 填补方法（英文）
-        "",  # col 5 填补误差 MSE（保持空）
-        mse,  # col 6 预测误差 MSE[0.5]
-        smape,  # col 7 预测误差 sMAPE[0.5]
-        *stl_values,  # col 8..13
-    ]
-    if has_trailing_comma:
-        fields.append("")  # col 14 空（trailing comma）
+    if layout == "wide":
+        # sundial 区块格式：col 5,6 都留空，col 7=MSE，col 8=sMAPE，col 9..14=STL 6 列。
+        # 共 14 字段，且不带 trailing comma。
+        fields = [
+            "",
+            "",
+            "",
+            imputer,
+            "",
+            "",
+            mse,
+            smape,
+            *stl_values,
+        ]
+    else:
+        # 紧凑格式：col 5=填补误差(占 1 列)，col 6=MSE，col 7=sMAPE，col 8..13=STL，
+        # col 14=trailing 空。
+        fields = [
+            "",
+            "",
+            "",
+            imputer,
+            "",
+            mse,
+            smape,
+            *stl_values,
+        ]
+        if has_trailing_comma:
+            fields.append("")
     return fields
 
 
@@ -222,6 +241,7 @@ def main():
     cur_dataset: Optional[str] = None
     cur_ratio: Optional[float] = None
     has_trailing_comma_for_block: bool = True  # chronos2 等都带 trailing comma
+    layout_for_block: str = "compact"
 
     i = 0
     while i < len(lines):
@@ -241,6 +261,13 @@ def main():
             cur_ratio = None
             has_trailing_comma_for_block = (
                 len(fields) >= 14 and fields[-1] == ""
+            )
+            # sundial 区块的 clean 行使用 "/, /, /" 三个填充字段；
+            # 其他模型 clean 行使用 "/, " 两个字段。靠这个差异判定 layout。
+            layout_for_block = (
+                "wide"
+                if (len(fields) >= 6 and fields[5] in {"/", ""} and fields[4] == "/" and fields[5] == "/")
+                else "compact"
             )
 
         # 检测 ratio 起始行（imputer = mean 的第一行）
@@ -265,6 +292,21 @@ def main():
             and len(fields) >= 4
             and fields[3].strip() == OLD_LAST_IMPUTER_LABEL
         ):
+            # 幂等：若紧随其后的 4 行已经是新 imputer，则视为之前已插入，跳过。
+            already_inserted = False
+            if i + len(NEW_IMPUTERS) < len(lines):
+                next_labels: List[str] = []
+                for k in range(1, len(NEW_IMPUTERS) + 1):
+                    nfields = split_csv_line(lines[i + k])
+                    if len(nfields) >= 4:
+                        next_labels.append(nfields[3].strip())
+                if next_labels == NEW_IMPUTERS:
+                    already_inserted = True
+
+            if already_inserted:
+                i += 1
+                continue
+
             for imputer in NEW_IMPUTERS:
                 new_fields = build_new_row(
                     model=cur_model,
@@ -276,6 +318,7 @@ def main():
                     keep_ratio_col=False,
                     repo_root=repo_root,
                     has_trailing_comma=has_trailing_comma_for_block,
+                    layout=layout_for_block,
                 )
                 if new_fields is None:
                     skipped_count += 1

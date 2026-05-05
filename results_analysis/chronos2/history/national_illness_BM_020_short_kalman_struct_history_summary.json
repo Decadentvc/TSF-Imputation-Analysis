@@ -1,0 +1,56 @@
+{
+  "model": "chronos2",
+  "dataset": "national_illness",
+  "method": "BM",
+  "ratio": 0.2,
+  "term": "short",
+  "imputation_method": "kalman_struct",
+  "n_windows": 20,
+  "period": 52,
+  "inject_range": {
+    "dataset_name": "national_illness",
+    "term": "short",
+    "frequency": "W",
+    "prediction_length": 8,
+    "windows": 20,
+    "max_context": 8192,
+    "start_index": 0,
+    "end_index": 958,
+    "injection_length": 958,
+    "total_length": 966
+  },
+  "summary": {
+    "mean": {
+      "trend_strength": 0.9309505167335939,
+      "trend_linearity": 926.7521643404214,
+      "seasonal_strength": 0.647429814657362,
+      "seasonal_correlation": 0.8570776474918897,
+      "residual_autocorr_lag1": 0.8430182971531048,
+      "spectral_entropy": 12348.263889923252
+    },
+    "std": {
+      "trend_strength": 0.018034224821416058,
+      "trend_linearity": 55.63770022939415,
+      "seasonal_strength": 0.08590835374952303,
+      "seasonal_correlation": 0.05659342822520664,
+      "residual_autocorr_lag1": 0.034438557653446535,
+      "spectral_entropy": 798.125367623777
+    },
+    "min": {
+      "trend_strength": 0.8877770054881468,
+      "trend_linearity": 862.7601513313109,
+      "seasonal_strength": 0.4879115734595656,
+      "seasonal_correlation": 0.7140832557327865,
+      "residual_autocorr_lag1": 0.7614515391072915,
+      "spectral_entropy": 11191.931769154835
+    },
+    "max": {
+      "trend_strength": 0.9484237087063482,
+      "trend_linearity": 1025.414479506693,
+      "seasonal_strength": 0.7341041206976762,
+      "seasonal_correlation": 0.9197852319430602,
+      "residual_autocorr_lag1": 0.9322855204772548,
+      "spectral_entropy": 13666.417705962365
+    }
+  }
+}

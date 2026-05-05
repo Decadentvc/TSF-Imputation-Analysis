@@ -1,0 +1,56 @@
+{
+  "model": "visiontspp",
+  "dataset": "Finland_Traffic_15T",
+  "method": "BM",
+  "ratio": 0.1,
+  "term": "long",
+  "imputation_method": "kalman_struct",
+  "n_windows": 20,
+  "period": 96,
+  "inject_range": {
+    "dataset_name": "Finland_Traffic_15T",
+    "term": "long",
+    "frequency": "15T",
+    "prediction_length": 720,
+    "windows": 20,
+    "max_context": 4000,
+    "start_index": 16736,
+    "end_index": 34416,
+    "injection_length": 17680,
+    "total_length": 35136
+  },
+  "summary": {
+    "mean": {
+      "trend_strength": 0.06589451696990928,
+      "trend_linearity": -0.003961337344651915,
+      "seasonal_strength": 0.8179643205274582,
+      "seasonal_correlation": 0.951581048729844,
+      "residual_autocorr_lag1": 0.8397662756744941,
+      "spectral_entropy": 27130.25053881131
+    },
+    "std": {
+      "trend_strength": 0.021680124847116497,
+      "trend_linearity": 0.003151679457686601,
+      "seasonal_strength": 0.038412039920790376,
+      "seasonal_correlation": 0.0113066177125147,
+      "residual_autocorr_lag1": 0.029284219862133427,
+      "spectral_entropy": 228.23563939126058
+    },
+    "min": {
+      "trend_strength": 0.040387120007519206,
+      "trend_linearity": -0.01110789723118639,
+      "seasonal_strength": 0.7515059711904405,
+      "seasonal_correlation": 0.9239269644889913,
+      "residual_autocorr_lag1": 0.7903136387638057,
+      "spectral_entropy": 26731.707295697073
+    },
+    "max": {
+      "trend_strength": 0.1288440488379008,
+      "trend_linearity": 0.0007693809090955319,
+      "seasonal_strength": 0.8945849993030333,
+      "seasonal_correlation": 0.9723309463103674,
+      "residual_autocorr_lag1": 0.8844956116265211,
+      "spectral_entropy": 27585.21578408874
+    }
+  }
+}

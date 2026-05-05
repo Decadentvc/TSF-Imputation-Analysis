@@ -106,6 +106,183 @@ class SundialAdapter:
         )
         self.model = self.model.to(self.device)
 
+        # 兼容 transformers>=4.42：新版 generate 流程把 attention_mask / position_ids
+        # 按时间步维度构造，而 sundial 的 SundialModel.forward 期望按 token 维度
+        # （time_steps / input_token_len）。这里 monkey-patch SundialModel.forward，
+        # 在入口处忽略外部传入的 attention_mask / position_ids，按 inputs_embeds 自身
+        # shape 重新构造，从而避免 _prepare_4d_causal_attention_mask 与 position_ids
+        # view 的 shape 错配。补丁仅作用于本 adapter 的 model 实例，其它 sundial 用户不受影响。
+        self._install_sundial_forward_patch()
+
+    def _install_sundial_forward_patch(self) -> None:
+        """对 SundialModel.forward 安装 attention_mask / position_ids 形状自愈补丁."""
+
+        import types
+
+        sundial_model = self.model.model
+        original_forward = sundial_model.forward
+
+        def patched_forward(
+            mod_self,
+            input_ids=None,
+            attention_mask=None,
+            position_ids=None,
+            past_key_values=None,
+            inputs_embeds=None,
+            use_cache=None,
+            output_attentions=None,
+            output_hidden_states=None,
+            return_dict=None,
+        ):
+            # 计算本次 forward 的 token 数（seq_length）：
+            # 优先用 inputs_embeds.shape[1]；否则按 input_ids.shape[1] // input_token_len。
+            input_token_len = int(
+                getattr(mod_self.config, "input_token_len", 1)
+            )
+            if inputs_embeds is not None:
+                token_len = int(inputs_embeds.shape[1])
+                bsz = int(inputs_embeds.shape[0])
+                device = inputs_embeds.device
+            elif input_ids is not None:
+                divisor = max(1, input_token_len)
+                token_len = int(input_ids.shape[1] // divisor)
+                bsz = int(input_ids.shape[0])
+                device = input_ids.device
+            else:
+                token_len = 0
+                bsz = 0
+                device = None
+
+            past_length = 0
+            if past_key_values is not None:
+                if hasattr(past_key_values, "get_seq_length"):
+                    try:
+                        past_length = int(past_key_values.get_seq_length())
+                    except Exception:
+                        past_length = 0
+                elif isinstance(past_key_values, (list, tuple)) and past_key_values:
+                    try:
+                        past_length = int(past_key_values[0][0].shape[2])
+                    except Exception:
+                        past_length = 0
+
+            if device is not None and token_len > 0:
+                target_mask_len = past_length + token_len
+                # 重建 attention_mask：长度 = past_length + token_len，全 1。
+                if (
+                    attention_mask is None
+                    or attention_mask.dim() != 2
+                    or attention_mask.shape[0] != bsz
+                    or attention_mask.shape[1] != target_mask_len
+                ):
+                    attention_mask = torch.ones(
+                        bsz, target_mask_len, dtype=torch.long, device=device
+                    )
+                # 重建 position_ids：(batch, token_len)。
+                if (
+                    position_ids is None
+                    or position_ids.dim() != 2
+                    or position_ids.shape[0] != bsz
+                    or position_ids.shape[1] != token_len
+                ):
+                    position_ids = (
+                        torch.arange(
+                            past_length,
+                            past_length + token_len,
+                            dtype=torch.long,
+                            device=device,
+                        )
+                        .unsqueeze(0)
+                        .expand(bsz, -1)
+                        .contiguous()
+                    )
+
+            return original_forward(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                position_ids=position_ids,
+                past_key_values=past_key_values,
+                inputs_embeds=inputs_embeds,
+                use_cache=use_cache,
+                output_attentions=output_attentions,
+                output_hidden_states=output_hidden_states,
+                return_dict=return_dict,
+            )
+
+        sundial_model.forward = types.MethodType(patched_forward, sundial_model)
+
+        # 兼容 transformers>=4.50：sundial ts_generation_mixin._update_model_kwargs_for_generation
+        # 调用 self._extract_past_from_model_output(...)，新版 GenerationMixin 已移除该方法。
+        # 这里给 SundialForPrediction 实例补一个等效实现。
+        if not hasattr(self.model, "_extract_past_from_model_output"):
+            def _extract_past_from_model_output(
+                _self, outputs, standardize_cache_format=False
+            ):
+                return getattr(outputs, "past_key_values", None)
+
+            self.model._extract_past_from_model_output = types.MethodType(
+                _extract_past_from_model_output, self.model
+            )
+
+    @torch.no_grad()
+    def _sundial_generate(
+        self,
+        inputs: torch.Tensor,
+        max_new_tokens: int,
+        num_samples: int,
+        revin: bool = True,
+    ) -> torch.Tensor:
+        """绕开新版 transformers 的 generate dispatch，直接调用 sundial 自带的 _greedy_search.
+
+        新版 transformers (>=4.45) 移除了 GenerationMixin._greedy_search，generate 内部
+        改 dispatch 到 _sample。但 sundial 在 ts_generation_mixin.py 中保留了一份定制
+        _greedy_search（每步生成 horizon_length 个 sample），且其 forward 输出不是普通 logits，
+        因此必须走 sundial 自身的 _greedy_search 才能正确生成 (batch, num_samples, horizon)
+        形状的样本。
+        """
+
+        from transformers.generation import (
+            MaxLengthCriteria,
+            StoppingCriteriaList,
+        )
+
+        if revin:
+            means = inputs.mean(dim=-1, keepdim=True)
+            stdev = inputs.std(dim=-1, keepdim=True, unbiased=False) + 1e-5
+            inputs_norm = (inputs - means) / stdev
+        else:
+            inputs_norm = inputs
+
+        cur_len = int(inputs_norm.shape[1])
+        max_length = cur_len + int(max_new_tokens)
+
+        stopping_criteria = StoppingCriteriaList(
+            [MaxLengthCriteria(max_length=max_length)]
+        )
+
+        input_token_len = int(getattr(self.model.config, "input_token_len", 1))
+        n_tokens = cur_len // max(1, input_token_len)
+        attention_mask = torch.ones(
+            inputs_norm.shape[0],
+            n_tokens,
+            dtype=torch.long,
+            device=inputs_norm.device,
+        )
+
+        outputs = self.model._greedy_search(
+            inputs_norm,
+            stopping_criteria=stopping_criteria,
+            attention_mask=attention_mask,
+            num_samples=num_samples,
+            revin=False,
+        )
+
+        if revin:
+            stdev_rep = stdev.unsqueeze(1).repeat(1, num_samples, 1)
+            means_rep = means.unsqueeze(1).repeat(1, num_samples, 1)
+            outputs = (outputs * stdev_rep) + means_rep
+        return outputs
+
     @staticmethod
     def _left_pad_and_stack_1d(tensors: List[torch.Tensor]) -> torch.Tensor:
         max_len = max(len(c) for c in tensors)
@@ -153,20 +330,31 @@ class SundialAdapter:
                 batch_x = torch.tensor(np.vstack(imputed_rows))
 
             batch_x = batch_x.to(self.device)
+            # 兼容 transformers>=4.42：sundial 远端代码期望 attention_mask 是
+            # "token 维度"（time_steps / input_token_len），但新版 transformers 的
+            # `_prepare_attention_mask_for_generation` 会按时间步维度自动创建 mask，
+            # 导致 _prepare_4d_causal_attention_mask 中形状错配。
+            # 这里显式按 token 维度构造全 1 mask，并把 batch_x 截成能整除
+            # input_token_len 的长度。
+            input_token_len = int(getattr(self.model.config, "input_token_len", 1))
+            if input_token_len > 1:
+                trim = batch_x.shape[-1] - (batch_x.shape[-1] // input_token_len) * input_token_len
+                if trim > 0:
+                    batch_x = batch_x[..., trim:]
             if self.device.startswith("cuda"):
                 with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-                    outputs = self.model.generate(
+                    outputs = self._sundial_generate(
                         batch_x,
                         max_new_tokens=self.prediction_length,
-                        revin=True,
                         num_samples=self.num_samples,
+                        revin=True,
                     )
             else:
-                outputs = self.model.generate(
+                outputs = self._sundial_generate(
                     batch_x,
                     max_new_tokens=self.prediction_length,
-                    revin=True,
                     num_samples=self.num_samples,
+                    revin=True,
                 )
 
             forecast_outputs.append(outputs.detach().cpu().numpy())

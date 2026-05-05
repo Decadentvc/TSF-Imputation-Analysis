@@ -1,0 +1,56 @@
+{
+  "model": "kairos50m",
+  "dataset": "Supply_Chain_Customer_D",
+  "method": "BM",
+  "ratio": 0.3,
+  "term": "long",
+  "imputation_method": "gp_rbf",
+  "n_windows": 3,
+  "period": 7,
+  "inject_range": {
+    "dataset_name": "Supply_Chain_Customer_D",
+    "term": "long",
+    "frequency": "D",
+    "prediction_length": 450,
+    "windows": 3,
+    "max_context": 2048,
+    "start_index": 0,
+    "end_index": 1557,
+    "injection_length": 1557,
+    "total_length": 2007
+  },
+  "summary": {
+    "mean": {
+      "trend_strength": 0.47374736222635544,
+      "trend_linearity": 13.573992224931951,
+      "seasonal_strength": 0.6686310585949151,
+      "seasonal_correlation": 0.6479715770062193,
+      "residual_autocorr_lag1": 0.1602297388697318,
+      "spectral_entropy": 14533.245472288336
+    },
+    "std": {
+      "trend_strength": 0.036786967444439454,
+      "trend_linearity": 3.101367164151504,
+      "seasonal_strength": 0.015366506539880897,
+      "seasonal_correlation": 0.01883509844658343,
+      "residual_autocorr_lag1": 0.01699994510940744,
+      "spectral_entropy": 5068.158329264669
+    },
+    "min": {
+      "trend_strength": 0.42284301863363105,
+      "trend_linearity": 9.250084458701975,
+      "seasonal_strength": 0.6479637467571095,
+      "seasonal_correlation": 0.630856843932649,
+      "residual_autocorr_lag1": 0.1399649809480288,
+      "spectral_entropy": 8359.280755929663
+    },
+    "max": {
+      "trend_strength": 0.5084991207437912,
+      "trend_linearity": 16.372800606474794,
+      "seasonal_strength": 0.6847820120744967,
+      "seasonal_correlation": 0.6742053638283468,
+      "residual_autocorr_lag1": 0.18156488045260563,
+      "spectral_entropy": 20773.157109187843
+    }
+  }
+}

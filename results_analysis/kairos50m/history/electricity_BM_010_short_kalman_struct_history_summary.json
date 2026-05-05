@@ -1,0 +1,56 @@
+{
+  "model": "kairos50m",
+  "dataset": "electricity",
+  "method": "BM",
+  "ratio": 0.1,
+  "term": "short",
+  "imputation_method": "kalman_struct",
+  "n_windows": 20,
+  "period": 24,
+  "inject_range": {
+    "dataset_name": "electricity",
+    "term": "short",
+    "frequency": "H",
+    "prediction_length": 48,
+    "windows": 20,
+    "max_context": 2048,
+    "start_index": 23296,
+    "end_index": 26256,
+    "injection_length": 2960,
+    "total_length": 26304
+  },
+  "summary": {
+    "mean": {
+      "trend_strength": 0.71260568260927,
+      "trend_linearity": -0.2619014185735983,
+      "seasonal_strength": 0.6653351867773167,
+      "seasonal_correlation": 0.9028626067552891,
+      "residual_autocorr_lag1": 0.7282884118862187,
+      "spectral_entropy": 17328.820232343605
+    },
+    "std": {
+      "trend_strength": 0.0318621385938418,
+      "trend_linearity": 0.038213421830075034,
+      "seasonal_strength": 0.022213070001624584,
+      "seasonal_correlation": 0.028478604883400135,
+      "residual_autocorr_lag1": 0.020678088049238843,
+      "spectral_entropy": 68.30646285864405
+    },
+    "min": {
+      "trend_strength": 0.6716894547529333,
+      "trend_linearity": -0.3358739649833359,
+      "seasonal_strength": 0.6124965292380549,
+      "seasonal_correlation": 0.8174597617606854,
+      "residual_autocorr_lag1": 0.6916685868375799,
+      "spectral_entropy": 17182.26121726712
+    },
+    "max": {
+      "trend_strength": 0.773282550386042,
+      "trend_linearity": -0.2100972306722974,
+      "seasonal_strength": 0.6951212400715787,
+      "seasonal_correlation": 0.9286971344836943,
+      "residual_autocorr_lag1": 0.7751961692225867,
+      "spectral_entropy": 17473.01093317172
+    }
+  }
+}

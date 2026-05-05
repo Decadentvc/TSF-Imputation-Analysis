@@ -1,0 +1,56 @@
+{
+  "model": "sundial",
+  "dataset": "Port_Activity_D",
+  "method": "BM",
+  "ratio": 0.2,
+  "term": "long",
+  "imputation_method": "kalman_struct",
+  "n_windows": 3,
+  "period": 7,
+  "inject_range": {
+    "dataset_name": "Port_Activity_D",
+    "term": "long",
+    "frequency": "D",
+    "prediction_length": 450,
+    "windows": 3,
+    "max_context": 2880,
+    "start_index": 0,
+    "end_index": 1677,
+    "injection_length": 1677,
+    "total_length": 2127
+  },
+  "summary": {
+    "mean": {
+      "trend_strength": 0.6007785555376784,
+      "trend_linearity": 1.0000570018308135,
+      "seasonal_strength": 0.10573714550280995,
+      "seasonal_correlation": 0.05718939757418804,
+      "residual_autocorr_lag1": -0.015021778953610834,
+      "spectral_entropy": 14539.1819892769
+    },
+    "std": {
+      "trend_strength": 0.06085139897523129,
+      "trend_linearity": 3.2174579091247613,
+      "seasonal_strength": 0.008418412434621308,
+      "seasonal_correlation": 0.02267532304196859,
+      "residual_autocorr_lag1": 0.010733576188718412,
+      "spectral_entropy": 4537.995786616772
+    },
+    "min": {
+      "trend_strength": 0.5356408979664395,
+      "trend_linearity": -1.5599084106784384,
+      "seasonal_strength": 0.09390967087449953,
+      "seasonal_correlation": 0.03327194516798724,
+      "residual_autocorr_lag1": -0.024788593197379437,
+      "spectral_entropy": 8977.00421740893
+    },
+    "max": {
+      "trend_strength": 0.6820521408719471,
+      "trend_linearity": 5.537797512243304,
+      "seasonal_strength": 0.1128288619409673,
+      "seasonal_correlation": 0.08764736742086174,
+      "residual_autocorr_lag1": -7.499807615512508e-05,
+      "spectral_entropy": 20092.768389119738
+    }
+  }
+}

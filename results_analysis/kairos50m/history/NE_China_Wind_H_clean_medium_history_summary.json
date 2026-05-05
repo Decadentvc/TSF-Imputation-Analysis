@@ -1,0 +1,56 @@
+{
+  "model": "kairos50m",
+  "dataset": "NE_China_Wind_H",
+  "method": "clean",
+  "ratio": null,
+  "term": "medium",
+  "imputation_method": null,
+  "n_windows": 11,
+  "period": 24,
+  "inject_range": {
+    "dataset_name": "NE_China_Wind_H",
+    "term": "medium",
+    "frequency": "H",
+    "prediction_length": 480,
+    "windows": 11,
+    "max_context": 2048,
+    "start_index": 1436,
+    "end_index": 8284,
+    "injection_length": 6848,
+    "total_length": 8764
+  },
+  "summary": {
+    "mean": {
+      "trend_strength": 0.9260728788679539,
+      "trend_linearity": 0.00014179946086570564,
+      "seasonal_strength": 0.16076041459630505,
+      "seasonal_correlation": 0.6532699352855514,
+      "residual_autocorr_lag1": 0.9544562430053237,
+      "spectral_entropy": 1184.806217706168
+    },
+    "std": {
+      "trend_strength": 0.018058450507378275,
+      "trend_linearity": 0.000630210389460767,
+      "seasonal_strength": 0.07303686690279153,
+      "seasonal_correlation": 0.05911106190537077,
+      "residual_autocorr_lag1": 0.017626196994129747,
+      "spectral_entropy": 470.8464541752183
+    },
+    "min": {
+      "trend_strength": 0.8861599872340111,
+      "trend_linearity": -0.0007162770221882965,
+      "seasonal_strength": 0.06253256450175881,
+      "seasonal_correlation": 0.5720148523421792,
+      "residual_autocorr_lag1": 0.9246775619566279,
+      "spectral_entropy": 473.41820754219805
+    },
+    "max": {
+      "trend_strength": 0.9527981306269574,
+      "trend_linearity": 0.0011949094044055074,
+      "seasonal_strength": 0.2864506371563762,
+      "seasonal_correlation": 0.7547262694023426,
+      "residual_autocorr_lag1": 0.9741148281216196,
+      "spectral_entropy": 2194.2695875224417
+    }
+  }
+}

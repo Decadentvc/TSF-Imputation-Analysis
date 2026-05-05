@@ -1,0 +1,56 @@
+{
+  "model": "visiontspp",
+  "dataset": "Supply_Chain_Customer_D",
+  "method": "clean",
+  "ratio": null,
+  "term": "short",
+  "imputation_method": null,
+  "n_windows": 20,
+  "period": 7,
+  "inject_range": {
+    "dataset_name": "Supply_Chain_Customer_D",
+    "term": "short",
+    "frequency": "D",
+    "prediction_length": 30,
+    "windows": 20,
+    "max_context": 4000,
+    "start_index": 0,
+    "end_index": 1977,
+    "injection_length": 1977,
+    "total_length": 2007
+  },
+  "summary": {
+    "mean": {
+      "trend_strength": 0.4529698398569077,
+      "trend_linearity": 15.421510304561158,
+      "seasonal_strength": 0.7434129057284636,
+      "seasonal_correlation": 0.9187136425845077,
+      "residual_autocorr_lag1": 0.0499922595611666,
+      "spectral_entropy": 22808.968907460217
+    },
+    "std": {
+      "trend_strength": 0.0068519136967617866,
+      "trend_linearity": 2.4107710584334954,
+      "seasonal_strength": 0.006172840721257452,
+      "seasonal_correlation": 0.0017939330019799099,
+      "residual_autocorr_lag1": 0.02387803093041008,
+      "spectral_entropy": 2473.083604305567
+    },
+    "min": {
+      "trend_strength": 0.4416536005304845,
+      "trend_linearity": 11.99106970517374,
+      "seasonal_strength": 0.7311855898638645,
+      "seasonal_correlation": 0.9137059432850578,
+      "residual_autocorr_lag1": 0.00410055657061022,
+      "spectral_entropy": 18651.627338615483
+    },
+    "max": {
+      "trend_strength": 0.4670557222521945,
+      "trend_linearity": 20.237035962791893,
+      "seasonal_strength": 0.7560142831472147,
+      "seasonal_correlation": 0.9222027967031003,
+      "residual_autocorr_lag1": 0.09280446305075199,
+      "spectral_entropy": 26892.724885430078
+    }
+  }
+}
