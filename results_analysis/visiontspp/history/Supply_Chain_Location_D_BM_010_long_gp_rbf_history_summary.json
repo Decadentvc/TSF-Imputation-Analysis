@@ -1,0 +1,56 @@
+{
+  "model": "visiontspp",
+  "dataset": "Supply_Chain_Location_D",
+  "method": "BM",
+  "ratio": 0.1,
+  "term": "long",
+  "imputation_method": "gp_rbf",
+  "n_windows": 3,
+  "period": 7,
+  "inject_range": {
+    "dataset_name": "Supply_Chain_Location_D",
+    "term": "long",
+    "frequency": "D",
+    "prediction_length": 450,
+    "windows": 3,
+    "max_context": 4000,
+    "start_index": 0,
+    "end_index": 1557,
+    "injection_length": 1557,
+    "total_length": 2007
+  },
+  "summary": {
+    "mean": {
+      "trend_strength": 0.41377913017170137,
+      "trend_linearity": 4.7713018847957365,
+      "seasonal_strength": 0.6306859300017028,
+      "seasonal_correlation": 0.717323674145582,
+      "residual_autocorr_lag1": 0.04478646703053224,
+      "spectral_entropy": 13902.487832495504
+    },
+    "std": {
+      "trend_strength": 0.010978007039970854,
+      "trend_linearity": 3.679698802527628,
+      "seasonal_strength": 0.023849750073305587,
+      "seasonal_correlation": 0.008068708398937526,
+      "residual_autocorr_lag1": 0.009692245253422875,
+      "spectral_entropy": 4880.300744085606
+    },
+    "min": {
+      "trend_strength": 0.39868353435123405,
+      "trend_linearity": -0.4301879596326757,
+      "seasonal_strength": 0.6018412369070976,
+      "seasonal_correlation": 0.7062603210915958,
+      "residual_autocorr_lag1": 0.031261085144243285,
+      "spectral_entropy": 7958.012385535452
+    },
+    "max": {
+      "trend_strength": 0.4244681377172971,
+      "trend_linearity": 7.508620833515566,
+      "seasonal_strength": 0.660247749064494,
+      "seasonal_correlation": 0.725275629012512,
+      "residual_autocorr_lag1": 0.053474634720168966,
+      "spectral_entropy": 19911.732598188406
+    }
+  }
+}

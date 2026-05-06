@@ -1,0 +1,56 @@
+{
+  "model": "sundial",
+  "dataset": "EWELD_Load_15T",
+  "method": "clean",
+  "ratio": null,
+  "term": "medium",
+  "imputation_method": null,
+  "n_windows": 20,
+  "period": 96,
+  "inject_range": {
+    "dataset_name": "EWELD_Load_15T",
+    "term": "medium",
+    "frequency": "15T",
+    "prediction_length": 480,
+    "windows": 20,
+    "max_context": 2880,
+    "start_index": 8064,
+    "end_index": 20064,
+    "injection_length": 12000,
+    "total_length": 20544
+  },
+  "summary": {
+    "mean": {
+      "trend_strength": 0.25004464386057573,
+      "trend_linearity": 0.0013438167674419694,
+      "seasonal_strength": 0.9017044190904047,
+      "seasonal_correlation": 0.9683895721368232,
+      "residual_autocorr_lag1": 0.6401835844072157,
+      "spectral_entropy": 20544.55405466565
+    },
+    "std": {
+      "trend_strength": 0.16456661178691429,
+      "trend_linearity": 0.007930068307525136,
+      "seasonal_strength": 0.02682017823765219,
+      "seasonal_correlation": 0.013677259184612276,
+      "residual_autocorr_lag1": 0.12760834164606333,
+      "spectral_entropy": 609.3585069448573
+    },
+    "min": {
+      "trend_strength": 0.04824000576616427,
+      "trend_linearity": -0.015133213936892247,
+      "seasonal_strength": 0.847686438865008,
+      "seasonal_correlation": 0.9234530474600986,
+      "residual_autocorr_lag1": 0.44527565286531734,
+      "spectral_entropy": 19383.200644052296
+    },
+    "max": {
+      "trend_strength": 0.5788603033171862,
+      "trend_linearity": 0.016974815162868875,
+      "seasonal_strength": 0.9475958234957669,
+      "seasonal_correlation": 0.9842168683236392,
+      "residual_autocorr_lag1": 0.870317064068469,
+      "spectral_entropy": 21685.22989210484
+    }
+  }
+}

@@ -3,6 +3,7 @@
 """
 import argparse
 import sys
+from inspect import signature
 from pathlib import Path
 from typing import List, Optional, Tuple
 import re
@@ -10,31 +11,9 @@ import re
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from Imputation.imputation_methods import (
-    zero_imputation,
-    mean_imputation,
-    forward_fill,
-    backward_fill,
-    linear_interpolation,
-    nearest_interpolation,
-    spline_interpolation,
-    seasonal_decomposition_imputation,
-    none_imputation,
-)
+from Imputation.imputation_methods import IMPUTATION_METHODS
 
 ALLOWED_METHODS = {"BM", "MCAR", "TM", "TVMR"}
-
-IMPUTATION_METHODS = {
-    'zero': zero_imputation,
-    'mean': mean_imputation,
-    'forward': forward_fill,
-    'backward': backward_fill,
-    'linear': linear_interpolation,
-    'nearest': nearest_interpolation,
-    'spline': spline_interpolation,
-    'seasonal': seasonal_decomposition_imputation,
-    'none': none_imputation,
-}
 
 
 def get_imputation_method(method_name: str):
@@ -47,12 +26,21 @@ def get_imputation_method(method_name: str):
     Returns:
         填补方法函数
     """
-    if method_name not in IMPUTATION_METHODS:
+    normalized = method_name.lower()
+    if normalized not in IMPUTATION_METHODS:
         raise ValueError(
             f"Unknown imputation method: {method_name}. "
             f"Available methods: {list(IMPUTATION_METHODS.keys())}"
         )
-    return IMPUTATION_METHODS[method_name]
+    return IMPUTATION_METHODS[normalized]
+
+
+def _call_imputer(imputation_func, df, data_cols, random_seed: int):
+    params = signature(imputation_func).parameters
+    kwargs = {}
+    if "random_seed" in params:
+        kwargs["random_seed"] = random_seed
+    return imputation_func(df, data_cols, **kwargs)
 
 
 def _infer_metadata_from_eval_path(eval_path: Path) -> Tuple[str, str, str, str]:
@@ -132,6 +120,7 @@ def impute_dataset(
     output_path: Optional[str] = None,
     base_output_dir: str = "datasets/Imputed",
     save_result: bool = True,
+    random_seed: int = 42,
 ) -> pd.DataFrame:
     """
     对评估数据集进行缺失值填补
@@ -154,6 +143,7 @@ def impute_dataset(
     print(f"{'='*80}")
     print(f"  Input: {eval_data_path}")
     print(f"  Method: {imputation_method}")
+    print(f"  Random seed: {random_seed}")
     
     df = pd.read_csv(eval_data_path)
     
@@ -172,7 +162,7 @@ def impute_dataset(
     
     if imputation_method.lower() != 'none':
         imputation_func = get_imputation_method(imputation_method)
-        df = imputation_func(df, data_cols)
+        df = _call_imputer(imputation_func, df, data_cols, random_seed=random_seed)
     
     missing_after = df.isna().sum().sum()
     
@@ -208,6 +198,7 @@ def batch_impute(
     eval_data_paths: List[str],
     imputation_methods: List[str],
     base_output_dir: str = "datasets/Imputed",
+    random_seed: int = 42,
 ) -> List[str]:
     """
     批量填补多个数据集
@@ -241,6 +232,7 @@ def batch_impute(
                 output_path=output_path,
                 base_output_dir=base_output_dir,
                 save_result=True,
+                random_seed=random_seed,
             )
             imputed_paths.append(output_path)
     
@@ -272,6 +264,12 @@ if __name__ == "__main__":
         default="datasets/Imputed",
         help="Base output directory",
     )
+    parser.add_argument(
+        "--random_seed",
+        type=int,
+        default=42,
+        help="Random seed for stochastic imputers",
+    )
     
     args = parser.parse_args()
     
@@ -281,4 +279,5 @@ if __name__ == "__main__":
         output_path=args.output_path,
         base_output_dir=args.base_output_dir,
         save_result=True,
+        random_seed=args.random_seed,
     )

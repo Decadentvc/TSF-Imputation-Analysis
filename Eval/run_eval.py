@@ -98,6 +98,7 @@ def check_and_impute_dataset(
     eval_data_path: str,
     imputation_method: str,
     imputed_data_dir: str = "data/datasets/Imputed",
+    random_seed: int = 42,
 ) -> str:
     imputed_path = generate_imputed_dataset_path(
         eval_data_path=eval_data_path,
@@ -115,6 +116,7 @@ def check_and_impute_dataset(
         output_path=imputed_path,
         base_output_dir=imputed_data_dir,
         save_result=True,
+        random_seed=random_seed,
     )
     return imputed_path
 
@@ -123,11 +125,14 @@ def batch_check_and_impute(
     eval_data_paths: List[str],
     imputation_methods: List[str],
     imputed_data_dir: str = "data/datasets/Imputed",
+    random_seed: int = 42,
 ) -> Dict[Tuple[str, str], str]:
     imputed_paths_map: Dict[Tuple[str, str], str] = {}
     for eval_path in eval_data_paths:
         for method in imputation_methods:
-            imputed_path = check_and_impute_dataset(eval_path, method, imputed_data_dir)
+            imputed_path = check_and_impute_dataset(
+                eval_path, method, imputed_data_dir, random_seed=random_seed
+            )
             imputed_paths_map[(eval_path, method)] = imputed_path
     return imputed_paths_map
 
@@ -288,6 +293,7 @@ def run_single_evaluation(
     predict_batches_jointly: bool = False,
     torch_dtype: Optional[str] = None,
     model_properties_path: str = DEFAULT_MODEL_PROPERTIES_PATH,
+    random_seed: int = 42,
 ):
     eval_path = Path(eval_data_path)
     if not eval_path.exists():
@@ -318,6 +324,7 @@ def run_single_evaluation(
             eval_data_path=str(eval_path),
             imputation_method=imputation_method,
             imputed_data_dir=imputed_data_dir,
+            random_seed=random_seed,
         )
 
     max_context = get_model_max_context(model, model_properties_path)
@@ -397,6 +404,7 @@ def batch_evaluate(
     predict_batches_jointly: bool = False,
     torch_dtype: Optional[str] = None,
     model_properties_path: str = DEFAULT_MODEL_PROPERTIES_PATH,
+    random_seed: int = 42,
 ) -> List[Tuple[str, str, str, Dict[str, Any]]]:
     if imputation_methods is None:
         imputation_methods = [
@@ -408,6 +416,10 @@ def batch_evaluate(
             "nearest",
             "spline",
             "seasonal",
+            "kalman_struct",
+            "kalman_arima",
+            "stl_kalman",
+            "gp_rbf",
         ]
     imputation_methods = [m.lower() for m in imputation_methods if m.lower() != "none"]
     if not imputation_methods:
@@ -427,7 +439,7 @@ def batch_evaluate(
 
     eval_path_list = [p for p, _ in eval_paths]
     imputed_map = batch_check_and_impute(
-        eval_path_list, imputation_methods, imputed_data_dir
+        eval_path_list, imputation_methods, imputed_data_dir, random_seed=random_seed
     )
 
     all_results: List[Tuple[str, str, str, Dict[str, Any]]] = []
@@ -598,6 +610,12 @@ def _build_parser() -> argparse.ArgumentParser:
             type=str,
             default=DEFAULT_MODEL_PROPERTIES_PATH,
         )
+        p.add_argument(
+            "--random_seed",
+            type=int,
+            default=42,
+            help="Random seed for stochastic imputers",
+        )
 
     single = subparsers.add_parser("single", help="Evaluate single missing dataset")
     single.add_argument("--eval_data_path", type=str, required=True)
@@ -657,6 +675,7 @@ def main():
                 predict_batches_jointly=args.predict_batches_jointly,
                 torch_dtype=args.torch_dtype,
                 model_properties_path=args.model_properties_path,
+                random_seed=args.random_seed,
             )
         elif args.mode == "batch":
             missing_ratios = (
@@ -689,6 +708,7 @@ def main():
                 predict_batches_jointly=args.predict_batches_jointly,
                 torch_dtype=args.torch_dtype,
                 model_properties_path=args.model_properties_path,
+                random_seed=args.random_seed,
             )
         elif args.mode == "clean":
             evaluate_clean(

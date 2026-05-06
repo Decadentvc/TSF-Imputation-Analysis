@@ -1,0 +1,56 @@
+{
+  "model": "sundial",
+  "dataset": "Australia_Solar_H",
+  "method": "BM",
+  "ratio": 0.1,
+  "term": "long",
+  "imputation_method": "gp_rbf",
+  "n_windows": 20,
+  "period": 24,
+  "inject_range": {
+    "dataset_name": "Australia_Solar_H",
+    "term": "long",
+    "frequency": "H",
+    "prediction_length": 720,
+    "windows": 20,
+    "max_context": 2880,
+    "start_index": 17784,
+    "end_index": 34344,
+    "injection_length": 16560,
+    "total_length": 35064
+  },
+  "summary": {
+    "mean": {
+      "trend_strength": 0.3334091661279997,
+      "trend_linearity": 28.742896753887777,
+      "seasonal_strength": 0.7904904253360583,
+      "seasonal_correlation": 0.901768105255776,
+      "residual_autocorr_lag1": 0.9046140072268747,
+      "spectral_entropy": 43406.79304682948
+    },
+    "std": {
+      "trend_strength": 0.11327846121189586,
+      "trend_linearity": 102.5158417470481,
+      "seasonal_strength": 0.04392093597890184,
+      "seasonal_correlation": 0.09847151857656737,
+      "residual_autocorr_lag1": 0.014820505060762905,
+      "spectral_entropy": 683.1229733419738
+    },
+    "min": {
+      "trend_strength": 0.08415491398241026,
+      "trend_linearity": -180.9126002787153,
+      "seasonal_strength": 0.6937140988057358,
+      "seasonal_correlation": 0.6269854864629462,
+      "residual_autocorr_lag1": 0.8772992623407969,
+      "spectral_entropy": 42115.292753967355
+    },
+    "max": {
+      "trend_strength": 0.48038651659831944,
+      "trend_linearity": 154.85075441386428,
+      "seasonal_strength": 0.8549850728062749,
+      "seasonal_correlation": 0.9811107365897811,
+      "residual_autocorr_lag1": 0.9299106881787211,
+      "spectral_entropy": 44301.76517994364
+    }
+  }
+}

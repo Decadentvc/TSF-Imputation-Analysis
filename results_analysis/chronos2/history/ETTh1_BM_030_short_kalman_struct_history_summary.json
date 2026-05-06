@@ -1,0 +1,56 @@
+{
+  "model": "chronos2",
+  "dataset": "ETTh1",
+  "method": "BM",
+  "ratio": 0.3,
+  "term": "short",
+  "imputation_method": "kalman_struct",
+  "n_windows": 20,
+  "period": 24,
+  "inject_range": {
+    "dataset_name": "ETTh1",
+    "term": "short",
+    "frequency": "H",
+    "prediction_length": 48,
+    "windows": 20,
+    "max_context": 8192,
+    "start_index": 8268,
+    "end_index": 17372,
+    "injection_length": 9104,
+    "total_length": 17420
+  },
+  "summary": {
+    "mean": {
+      "trend_strength": 0.9633745208137153,
+      "trend_linearity": -0.0014873883073435608,
+      "seasonal_strength": 0.2608847596625827,
+      "seasonal_correlation": 0.4050733519629257,
+      "residual_autocorr_lag1": 0.8037977572231414,
+      "spectral_entropy": 31472.005185497605
+    },
+    "std": {
+      "trend_strength": 0.00395617959306706,
+      "trend_linearity": 0.000258274049937491,
+      "seasonal_strength": 0.01624805775263768,
+      "seasonal_correlation": 0.03527064931037308,
+      "residual_autocorr_lag1": 0.006053769925828559,
+      "spectral_entropy": 190.70478917960256
+    },
+    "min": {
+      "trend_strength": 0.9540295414339721,
+      "trend_linearity": -0.0018371109541632854,
+      "seasonal_strength": 0.23507063677486073,
+      "seasonal_correlation": 0.34807072842965636,
+      "residual_autocorr_lag1": 0.7982170337023268,
+      "spectral_entropy": 31113.01250483276
+    },
+    "max": {
+      "trend_strength": 0.9681274936350517,
+      "trend_linearity": -0.001031805700808599,
+      "seasonal_strength": 0.2880893361746828,
+      "seasonal_correlation": 0.461567576106931,
+      "residual_autocorr_lag1": 0.8151803513082154,
+      "spectral_entropy": 31741.207103501194
+    }
+  }
+}

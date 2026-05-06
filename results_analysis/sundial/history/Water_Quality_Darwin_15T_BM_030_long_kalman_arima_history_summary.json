@@ -1,0 +1,56 @@
+{
+  "model": "sundial",
+  "dataset": "Water_Quality_Darwin_15T",
+  "method": "BM",
+  "ratio": 0.3,
+  "term": "long",
+  "imputation_method": "kalman_arima",
+  "n_windows": 16,
+  "period": 96,
+  "inject_range": {
+    "dataset_name": "Water_Quality_Darwin_15T",
+    "term": "long",
+    "frequency": "15T",
+    "prediction_length": 720,
+    "windows": 16,
+    "max_context": 2880,
+    "start_index": 4585,
+    "end_index": 18265,
+    "injection_length": 13680,
+    "total_length": 18985
+  },
+  "summary": {
+    "mean": {
+      "trend_strength": 0.3518329885585335,
+      "trend_linearity": -0.0010208329397955597,
+      "seasonal_strength": 0.12009641683181967,
+      "seasonal_correlation": 0.5575349623830355,
+      "residual_autocorr_lag1": 0.9569295147250558,
+      "spectral_entropy": 9554.322929322316
+    },
+    "std": {
+      "trend_strength": 0.16917457842987568,
+      "trend_linearity": 0.002341365911106222,
+      "seasonal_strength": 0.12861915556842027,
+      "seasonal_correlation": 0.24830356392347874,
+      "residual_autocorr_lag1": 0.012953604434657158,
+      "spectral_entropy": 1005.4523093735612
+    },
+    "min": {
+      "trend_strength": 0.09737843939500779,
+      "trend_linearity": -0.0035274154583065684,
+      "seasonal_strength": 0.0,
+      "seasonal_correlation": 0.08771288965704026,
+      "residual_autocorr_lag1": 0.9272624766532837,
+      "spectral_entropy": 7883.332671060347
+    },
+    "max": {
+      "trend_strength": 0.7455704408576037,
+      "trend_linearity": 0.00493355465609798,
+      "seasonal_strength": 0.43430008029356226,
+      "seasonal_correlation": 0.814576665136643,
+      "residual_autocorr_lag1": 0.9787603066893332,
+      "spectral_entropy": 10940.164670433876
+    }
+  }
+}

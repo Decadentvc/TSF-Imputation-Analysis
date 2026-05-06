@@ -12,6 +12,12 @@ from .imputation_methods import (
     polynomial_interpolation,
     spline_interpolation,
     seasonal_decomposition_imputation,
+    kalman_struct_imputation,
+    kalman_arima_imputation,
+    stl_kalman_imputation,
+    gp_rbf_imputation,
+    saits_imputation,
+    IMPUTATION_METHODS,
     get_imputation_method,
 )
 
@@ -25,5 +31,11 @@ __all__ = [
     'polynomial_interpolation',
     'spline_interpolation',
     'seasonal_decomposition_imputation',
+    'kalman_struct_imputation',
+    'kalman_arima_imputation',
+    'stl_kalman_imputation',
+    'gp_rbf_imputation',
+    'saits_imputation',
+    'IMPUTATION_METHODS',
     'get_imputation_method',
 ]

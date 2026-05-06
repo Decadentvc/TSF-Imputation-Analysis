@@ -187,6 +187,12 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--device", type=str, default="cpu")
     parser.add_argument("--predict_batches_jointly", action="store_true")
     parser.add_argument("--torch_dtype", type=str, default=None)
+    parser.add_argument(
+        "--random_seed",
+        type=int,
+        default=42,
+        help="Random seed for stochastic imputers",
+    )
 
     parser.add_argument(
         "--force",
@@ -413,6 +419,7 @@ def main() -> None:
                     intermediate_dir=args.intermediate_dir,
                     predict_batches_jointly=args.predict_batches_jointly,
                     torch_dtype=args.torch_dtype,
+                    random_seed=args.random_seed,
                 )
                 succeeded += 1
             except Exception as exc:
