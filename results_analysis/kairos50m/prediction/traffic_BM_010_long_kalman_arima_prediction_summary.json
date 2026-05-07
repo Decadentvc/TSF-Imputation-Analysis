@@ -1,0 +1,44 @@
+{
+  "model": "kairos50m",
+  "dataset": "traffic",
+  "method": "BM",
+  "ratio": 0.1,
+  "term": "long",
+  "imputation_method": "kalman_arima",
+  "n_windows": 15,
+  "period": 24,
+  "summary": {
+    "mean": {
+      "trend_strength": 0.26084396044732855,
+      "trend_linearity": -1.238060261188997e-06,
+      "seasonal_strength": 0.9452099197581872,
+      "seasonal_correlation": 0.9924837803580284,
+      "residual_autocorr_lag1": 0.832806393113416,
+      "spectral_entropy": -2875.560224833724
+    },
+    "std": {
+      "trend_strength": 0.0551145630194456,
+      "trend_linearity": 1.5924916458162675e-06,
+      "seasonal_strength": 0.009914413282365333,
+      "seasonal_correlation": 0.005917082946827611,
+      "residual_autocorr_lag1": 0.04232308102404051,
+      "spectral_entropy": 133.71190257960288
+    },
+    "min": {
+      "trend_strength": 0.18085845894943042,
+      "trend_linearity": -5.401657056340036e-06,
+      "seasonal_strength": 0.928230906346487,
+      "seasonal_correlation": 0.9738897034271199,
+      "residual_autocorr_lag1": 0.7428617535504772,
+      "spectral_entropy": -3059.8262287838106
+    },
+    "max": {
+      "trend_strength": 0.400106643792281,
+      "trend_linearity": 1.7657455803243476e-06,
+      "seasonal_strength": 0.9634823860680357,
+      "seasonal_correlation": 0.9976642286915055,
+      "residual_autocorr_lag1": 0.8932404780392412,
+      "spectral_entropy": -2528.1111242701663
+    }
+  }
+}
