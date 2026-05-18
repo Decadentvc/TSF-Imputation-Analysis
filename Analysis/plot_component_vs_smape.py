@@ -26,6 +26,7 @@ import time
 import warnings
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import numpy as np
 import pandas as pd
@@ -71,6 +72,12 @@ COMPONENTS = ["trend", "seasonal", "freq"]
 WINDOW_TYPES = ["pred", "hist"]
 
 TERMS = {"short", "medium", "long"}
+
+# 所有已知填补方法名（含下划线的优先匹配，按长度降序）
+KNOWN_METHODS = sorted([
+    "backward", "forward", "linear", "mean",
+    "gp_rbf", "kalman_arima", "kalman_struct", "saits",
+], key=len, reverse=True)
 
 INTERMEDIATE_DIR = ROOT_DIR / "data" / "Intermediate_Predictions"
 DATA_DIR = ROOT_DIR / "data" / "datasets"
@@ -169,19 +176,32 @@ def load_clean_smape(results_dir: Path) -> Dict[Tuple[str, str, str], float]:
 
 
 def load_impute_smape(results_dir: Path) -> Dict[Tuple[str, str, str, int, str], float]:
-    """{(model, dataset, term, ratio, method): smape}"""
+    """{(model, dataset, term, ratio, method): smape}
+
+    支持含下划线的填补方法名（如 gp_rbf, kalman_arima, kalman_struct）。
+    """
     result: Dict[Tuple[str, str, str, int, str], float] = {}
-    pat = re.compile(
-        r"^([A-Za-z0-9]+)_(.+)_BM_length\d+_(\d{3})_(short|medium|long)_results\.csv$"
-    )
+    pat = re.compile(r"^(.+)_BM_length\d+_(\d{3})_(short|medium|long)_results\.csv$")
     for fp in sorted(results_dir.glob("*/impute/*_results.csv")):
         model = fp.parent.parent.name
         m = pat.match(fp.name)
         if not m:
             continue
-        method, dataset, ratio_str, term = (
-            m.group(1), m.group(2), m.group(3), m.group(4)
-        )
+        pre = m.group(1)   # e.g. "gp_rbf_Australia_Solar_H" 或 "forward_Australia_Solar_H"
+        ratio_str = m.group(2)
+        term = m.group(3)
+
+        # 用已知方法名列表分离 method 和 dataset（优先匹配长方法名）
+        method = None
+        dataset = None
+        for meth in KNOWN_METHODS:
+            if pre.startswith(meth + "_"):
+                method = meth
+                dataset = pre[len(meth) + 1:]
+                break
+        if method is None or dataset is None:
+            continue
+
         df = pd.read_csv(fp)
         row = df[df["metric"] == "sMAPE[0.5]"]
         if row.empty:
@@ -246,23 +266,30 @@ def _compute_smape_from_pred_file(
     return float(np.mean(smapes)) if smapes else None
 
 
-def load_bias_pairs(bias_dir: Path, models: List[str]) -> pd.DataFrame:
-    """加载 bias_pairs.csv 并提取唯一 (model,dataset,term,ratio,method,window_idx)"""
-    pieces = []
-    for model in models:
-        fp = bias_dir / model / "bias_pairs.csv"
-        if fp.exists():
-            df = pd.read_csv(fp)
-            pieces.append(df)
-    if not pieces:
+def generate_combos(
+    impute_smape: Dict[Tuple[str, str, str, int, str], float],
+    models: List[str],
+    intermediate_dir: Path = INTERMEDIATE_DIR,
+) -> pd.DataFrame:
+    """从 impute SMAPE keys + 预测文件生成 (model,dataset,term,ratio,method,window_idx) 组合"""
+    records: List[Dict[str, Any]] = []
+    for (model, dataset, term, ratio, method) in impute_smape:
+        if model not in models:
+            continue
+        ratio_s = f"{ratio:03d}"
+        pred_dir = intermediate_dir / model / f"{dataset}_BM_length50_{ratio_s}_{term}_prediction" / method
+        if not pred_dir.exists():
+            continue
+        for fp in sorted(pred_dir.glob(f"{dataset}_BM_length50_{ratio_s}_{term}_prediction_*.csv")):
+            m = re.search(r"_prediction_(\d+)\.csv$", fp.name)
+            if m:
+                records.append({
+                    "model": model, "dataset": dataset, "term": term,
+                    "ratio": ratio, "method": method, "window_idx": int(m.group(1)),
+                })
+    if not records:
         return pd.DataFrame()
-    df = pd.concat(pieces, ignore_index=True)
-    # window_idx 和 ratio 转为 int
-    df["window_idx"] = df["window_idx"].astype(int)
-    df["ratio"] = df["ratio"].astype(int)
-    # 去重保留唯一组合
-    uniq = df[["model", "dataset", "term", "ratio", "method", "window_idx"]].drop_duplicates()
-    return uniq.reset_index(drop=True)
+    return pd.DataFrame(records).drop_duplicates().reset_index(drop=True)
 
 
 # ======================================================
@@ -759,22 +786,25 @@ def main() -> None:
     print("分量变化率 vs SMAPE 变化率分析")
     print("=" * 60)
 
-    # Step 1: 加载所有 bias_pairs 的唯一组合
-    print("\n[1/5] 加载 bias_pairs 组合...")
-    combos = load_bias_pairs(BIAS_BY_MODEL_DIR, models)
-    if combos.empty:
-        print("  [错误] 未找到 bias_pairs 数据")
-        return
-    if datasets_filter:
-        combos = combos[combos["dataset"].isin(datasets_filter)]
-    print(f"  共 {len(combos)} 个 (model,dataset,term,ratio,method,window_idx) 组合")
-
-    # Step 2: 加载 SMAPE
-    print("\n[2/5] 加载 SMAPE 数据...")
+    # Step 1: 加载 SMAPE 数据（先于 combo 生成，因为 combo 依赖 impute SMAPE keys）
+    print("\n[1/5] 加载 SMAPE 数据...")
     clean_smape_avg = load_clean_smape(RESULTS_DIR)
     impute_smape_avg = load_impute_smape(RESULTS_DIR)
     print(f"  干净 SMAPE: {len(clean_smape_avg)} 条")
     print(f"  填补 SMAPE: {len(impute_smape_avg)} 条")
+    if not impute_smape_avg:
+        print("  [错误] 未找到填补 SMAPE 数据")
+        return
+
+    # Step 2: 从 SMAPE keys + 预测文件生成组合
+    print("\n[2/5] 生成 (model,dataset,term,ratio,method,window_idx) 组合...")
+    combos = generate_combos(impute_smape_avg, models)
+    if combos.empty:
+        print("  [错误] 未生成任何组合")
+        return
+    if datasets_filter:
+        combos = combos[combos["dataset"].isin(datasets_filter)]
+    print(f"  共 {len(combos)} 个组合")
 
     # 构建 period 映射
     period_map: Dict[str, int] = {}
