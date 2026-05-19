@@ -193,6 +193,17 @@ def _build_parser() -> argparse.ArgumentParser:
         default=42,
         help="Random seed for stochastic imputers",
     )
+    parser.add_argument(
+        "--max_context",
+        type=int,
+        default=None,
+        help="Override model context length for context ablations",
+    )
+    parser.add_argument(
+        "--preserve_imputed_stem",
+        action="store_true",
+        help="Keep full evaluation dataset stem in imputed filenames",
+    )
 
     parser.add_argument(
         "--force",
@@ -296,10 +307,12 @@ def main() -> None:
     print(f"Terms (requested): {normalized_terms if normalized_terms else 'auto by dataset'}")
     print(f"Include clean: {run_clean}")
     print(f"Run imputation: {run_impute}")
+    print(f"Max context override: {args.max_context if args.max_context else 'model default'}")
     if run_impute:
         print(f"Imputation methods: {imputation_methods}")
         print(f"Missing ratios: {missing_ratios if missing_ratios else 'default from run_eval.py'}")
         print(f"Impute output dir: {output_dir}")
+        print(f"Preserve imputed stem: {args.preserve_imputed_stem}")
     if run_clean:
         print(f"Clean output dir: {clean_output_dir}")
 
@@ -380,6 +393,7 @@ def main() -> None:
                     intermediate_dir=args.intermediate_dir,
                     predict_batches_jointly=args.predict_batches_jointly,
                     torch_dtype=args.torch_dtype,
+                    max_context=args.max_context,
                 )
                 succeeded += 1
             except Exception as exc:
@@ -420,6 +434,8 @@ def main() -> None:
                     predict_batches_jointly=args.predict_batches_jointly,
                     torch_dtype=args.torch_dtype,
                     random_seed=args.random_seed,
+                    max_context=args.max_context,
+                    preserve_imputed_stem=args.preserve_imputed_stem,
                 )
                 succeeded += 1
             except Exception as exc:

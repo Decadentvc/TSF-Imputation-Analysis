@@ -102,13 +102,17 @@ def generate_imputed_dataset_path(
     eval_data_path: str,
     imputation_method: str,
     base_output_dir: str = "datasets/Imputed",
+    preserve_eval_stem: bool = False,
 ) -> str:
     """统一生成填补结果输出路径，确保目录结构一致。"""
 
     eval_path = Path(eval_data_path)
     dataset_name, method, ratio, term = _infer_metadata_from_eval_path(eval_path)
 
-    output_filename = f"{dataset_name}_{method}_{ratio}_{term}_{imputation_method}.csv"
+    if preserve_eval_stem:
+        output_filename = f"{eval_path.stem}_{imputation_method}.csv"
+    else:
+        output_filename = f"{dataset_name}_{method}_{ratio}_{term}_{imputation_method}.csv"
     output_dir = Path(base_output_dir) / method / f"{method}_{ratio}"
     output_dir.mkdir(parents=True, exist_ok=True)
     return str(output_dir / output_filename)
@@ -121,6 +125,7 @@ def impute_dataset(
     base_output_dir: str = "datasets/Imputed",
     save_result: bool = True,
     random_seed: int = 42,
+    preserve_eval_stem: bool = False,
 ) -> pd.DataFrame:
     """
     对评估数据集进行缺失值填补
@@ -175,6 +180,7 @@ def impute_dataset(
                 eval_data_path=eval_data_path,
                 imputation_method=imputation_method,
                 base_output_dir=base_output_dir,
+                preserve_eval_stem=preserve_eval_stem,
             )
         
         output_dir = Path(output_path).parent
@@ -199,6 +205,7 @@ def batch_impute(
     imputation_methods: List[str],
     base_output_dir: str = "datasets/Imputed",
     random_seed: int = 42,
+    preserve_eval_stem: bool = False,
 ) -> List[str]:
     """
     批量填补多个数据集
@@ -219,6 +226,7 @@ def batch_impute(
                 eval_data_path=eval_path,
                 imputation_method=method,
                 base_output_dir=base_output_dir,
+                preserve_eval_stem=preserve_eval_stem,
             )
             
             if Path(output_path).exists():
@@ -233,6 +241,7 @@ def batch_impute(
                 base_output_dir=base_output_dir,
                 save_result=True,
                 random_seed=random_seed,
+                preserve_eval_stem=preserve_eval_stem,
             )
             imputed_paths.append(output_path)
     
@@ -270,6 +279,11 @@ if __name__ == "__main__":
         default=42,
         help="Random seed for stochastic imputers",
     )
+    parser.add_argument(
+        "--preserve_eval_stem",
+        action="store_true",
+        help="Keep the full evaluation dataset stem in the imputed filename",
+    )
     
     args = parser.parse_args()
     
@@ -280,4 +294,5 @@ if __name__ == "__main__":
         base_output_dir=args.base_output_dir,
         save_result=True,
         random_seed=args.random_seed,
+        preserve_eval_stem=args.preserve_eval_stem,
     )

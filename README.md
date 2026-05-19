@@ -45,6 +45,38 @@
 python tools/Missing_Value_Injection/batch_bm_injection.py --missing_ratios 0.1,0.2,0.3 --block_length 50 --mode stratified
 ```
 
+## 消融实验代码
+
+论文 4.3 的消融实验由三类新增入口支撑：`tools/Missing_Value_Injection/ablation_missingness.py` 生成缺失率、块长、块位置和缺失形态消融所需的数据；`tools/run_ablation_experiments.py` 生成或执行对应的模型评估命令；`Analysis/structure_metric_ablation.py` 基于主实验汇总表计算结构通道组合与相对预测误差之间的统计关系。
+
+生成 4.3.1 缺失率消融数据，默认数据集为 `electricity,ETTh1,weather,traffic,exchange_rate,azure2019_U_5T`，缺失率为 `5%,10%,20%,30%,40%,50%`，块长固定为 50：
+
+```bash
+python tools/Missing_Value_Injection/ablation_missingness.py ratio
+```
+
+生成 4.3.2 缺失形态消融数据，默认数据集为 `ETTh1,weather,traffic,exchange_rate`。块长消融使用 `length10,length25,length50,length100,length200`；位置消融固定 `30%` 和 `length50`，生成前段、中段、末段三组；形态消融生成随机点、单块、多块三组：
+
+```bash
+python tools/Missing_Value_Injection/ablation_missingness.py length
+python tools/Missing_Value_Injection/ablation_missingness.py position
+python tools/Missing_Value_Injection/ablation_missingness.py pattern
+```
+
+生成 4.3.1 至 4.3.3 的评估命令，默认只打印命令，结果目录使用 `results_ablation/`，填补中间数据使用 `data/datasets/Imputed_Ablation/`，逐窗口预测使用 `data/Intermediate_Predictions_Ablation/`。确认命令后加 `--execute` 执行：
+
+```bash
+python tools/run_ablation_experiments.py --suites ratio,length,position,pattern,horizon,context --device cuda
+```
+
+预测长度消融默认设置 `H=96,192,336,720`，并将回顾长度设为 2048；上下文长度消融默认设置 `L=512,1024,2048,4096`，并将预测长度设为 720。两组实验的输出按 `horizon_Hxxx` 和 `context_Lxxxx` 分目录保存，避免覆盖常规实验结果。
+
+结构指标消融直接使用现有主实验汇总表，不触发模型推理。脚本会构造仅趋势、仅季节、仅残差、仅频域、去掉某一通道和完整指标等组合，并输出分组 Spearman 相关和整体线性回归解释度：
+
+```bash
+python Analysis/structure_metric_ablation.py --input results_analysis/块状缺失对长序列预测影响-实验结果统计-0509.csv
+```
+
 ## 实现的填补算法
 
 填补算法集中注册在 `Imputation/imputation_methods.py`，主评估流程通过 `Eval/impute_dataset.py` 调用。
