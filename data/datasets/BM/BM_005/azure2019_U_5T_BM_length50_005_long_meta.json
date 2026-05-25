@@ -1,0 +1,81 @@
+{
+  "dataset_name": "azure2019_U_5T",
+  "term": "long",
+  "missing_ratio": 0.05,
+  "block_length": 50,
+  "mode": "stratified",
+  "n_blocks": 1,
+  "total_cells": 1286,
+  "injected_missing": 50,
+  "actual_missing_ratio": 0.038880248833592534,
+  "injection_range": {
+    "start_index": 0,
+    "end_index": 1286,
+    "length": 1286
+  },
+  "balanced_contexts": [
+    512,
+    2048,
+    2880,
+    4096,
+    8192
+  ],
+  "ratio_tolerance": 0.1,
+  "repair_steps": 20,
+  "within_tolerance": false,
+  "context_stats": [
+    {
+      "max_context": 512,
+      "start_index": 54,
+      "end_index": 1286,
+      "total_cells": 1232,
+      "missing_cells": 50,
+      "missing_ratio": 0.040584415584415584
+    },
+    {
+      "max_context": 2048,
+      "start_index": 0,
+      "end_index": 1286,
+      "total_cells": 1286,
+      "missing_cells": 50,
+      "missing_ratio": 0.038880248833592534
+    },
+    {
+      "max_context": 2880,
+      "start_index": 0,
+      "end_index": 1286,
+      "total_cells": 1286,
+      "missing_cells": 50,
+      "missing_ratio": 0.038880248833592534
+    },
+    {
+      "max_context": 4096,
+      "start_index": 0,
+      "end_index": 1286,
+      "total_cells": 1286,
+      "missing_cells": 50,
+      "missing_ratio": 0.038880248833592534
+    },
+    {
+      "max_context": 8192,
+      "start_index": 0,
+      "end_index": 1286,
+      "total_cells": 1286,
+      "missing_cells": 50,
+      "missing_ratio": 0.038880248833592534
+    }
+  ],
+  "block_positions": [
+    {
+      "column": "max_cpu",
+      "start": 111,
+      "end": 161,
+      "length": 50
+    }
+  ],
+  "data_columns": [
+    "max_cpu"
+  ],
+  "pattern": "multi_block",
+  "position": "stratified"
+}

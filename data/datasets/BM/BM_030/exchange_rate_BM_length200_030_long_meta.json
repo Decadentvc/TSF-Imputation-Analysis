@@ -1,0 +1,135 @@
+{
+  "dataset_name": "exchange_rate",
+  "term": "long",
+  "missing_ratio": 0.3,
+  "block_length": 200,
+  "mode": "stratified",
+  "n_blocks": 10,
+  "total_cells": 7138,
+  "injected_missing": 2000,
+  "actual_missing_ratio": 0.2801905295601009,
+  "injection_range": {
+    "start_index": 0,
+    "end_index": 7138,
+    "length": 7138
+  },
+  "balanced_contexts": [
+    512,
+    2048,
+    2880,
+    4096,
+    8192
+  ],
+  "ratio_tolerance": 0.1,
+  "repair_steps": 20,
+  "within_tolerance": true,
+  "context_stats": [
+    {
+      "max_context": 512,
+      "start_index": 2126,
+      "end_index": 7138,
+      "total_cells": 5012,
+      "missing_cells": 1400,
+      "missing_ratio": 0.27932960893854747
+    },
+    {
+      "max_context": 2048,
+      "start_index": 590,
+      "end_index": 7138,
+      "total_cells": 6548,
+      "missing_cells": 1800,
+      "missing_ratio": 0.2748930971288943
+    },
+    {
+      "max_context": 2880,
+      "start_index": 0,
+      "end_index": 7138,
+      "total_cells": 7138,
+      "missing_cells": 2000,
+      "missing_ratio": 0.2801905295601009
+    },
+    {
+      "max_context": 4096,
+      "start_index": 0,
+      "end_index": 7138,
+      "total_cells": 7138,
+      "missing_cells": 2000,
+      "missing_ratio": 0.2801905295601009
+    },
+    {
+      "max_context": 8192,
+      "start_index": 0,
+      "end_index": 7138,
+      "total_cells": 7138,
+      "missing_cells": 2000,
+      "missing_ratio": 0.2801905295601009
+    }
+  ],
+  "block_positions": [
+    {
+      "column": "OT",
+      "start": 6431,
+      "end": 6631,
+      "length": 200
+    },
+    {
+      "column": "OT",
+      "start": 2396,
+      "end": 2596,
+      "length": 200
+    },
+    {
+      "column": "OT",
+      "start": 4046,
+      "end": 4246,
+      "length": 200
+    },
+    {
+      "column": "OT",
+      "start": 3615,
+      "end": 3815,
+      "length": 200
+    },
+    {
+      "column": "OT",
+      "start": 5770,
+      "end": 5970,
+      "length": 200
+    },
+    {
+      "column": "OT",
+      "start": 4771,
+      "end": 4971,
+      "length": 200
+    },
+    {
+      "column": "OT",
+      "start": 2737,
+      "end": 2937,
+      "length": 200
+    },
+    {
+      "column": "OT",
+      "start": 1587,
+      "end": 1787,
+      "length": 200
+    },
+    {
+      "column": "OT",
+      "start": 887,
+      "end": 1087,
+      "length": 200
+    },
+    {
+      "column": "OT",
+      "start": 158,
+      "end": 358,
+      "length": 200
+    }
+  ],
+  "data_columns": [
+    "OT"
+  ],
+  "pattern": "multi_block",
+  "position": "stratified"
+}
