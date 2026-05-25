@@ -16,8 +16,17 @@ from __future__ import annotations
 import argparse
 import gc
 import json
+import sys
 from pathlib import Path
 from typing import Iterable, List, Optional
+
+# Force UTF-8 on stdout/stderr so unicode glyphs (▶ ✓ ✗ ⚠) don't crash on Windows GBK consoles
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
 
 from tqdm import tqdm
 

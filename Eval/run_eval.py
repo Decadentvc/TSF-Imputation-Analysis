@@ -12,6 +12,14 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+# Force UTF-8 on stdout/stderr so unicode glyphs don't crash on Windows GBK consoles
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
 from eval_pipeline import (
     evaluate_with_adapter,
     get_allowed_terms,
