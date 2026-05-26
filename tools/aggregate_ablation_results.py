@@ -85,6 +85,8 @@ def _parse_filename(stem: str, suite: str) -> Optional[Dict[str, str]]:
             "missing_ratio": int(m.group("ratio")) / 100.0,
         }
     else:
+        # ratio / length / horizon / context 套件均使用统一文件名模式：
+        # {dataset}_BM_length{block}_{ratio}
         m = re.match(r"^(?P<dataset>.+)_BM_length(?P<block>\d+)_(?P<ratio>\d+)$", rest)
         if not m:
             return None
@@ -141,6 +143,50 @@ def collect_suite(suite_root: Path, suite: str) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def collect_horizon_suite(root: Path) -> pd.DataFrame:
+    """聚合 horizon_H{xxx} 多子目录到统一 DataFrame，加上 horizon 列。"""
+    frames: List[pd.DataFrame] = []
+    if not root.exists():
+        return pd.DataFrame()
+    for suite_dir in sorted(root.glob("horizon_H*")):
+        if not suite_dir.is_dir():
+            continue
+        m = re.match(r"^horizon_H(?P<h>\d+)$", suite_dir.name)
+        if not m:
+            continue
+        horizon_value = int(m.group("h"))
+        sub = collect_suite(suite_dir, "horizon")
+        if sub.empty:
+            continue
+        sub["horizon"] = horizon_value
+        frames.append(sub)
+    if not frames:
+        return pd.DataFrame()
+    return pd.concat(frames, ignore_index=True)
+
+
+def collect_context_suite(root: Path) -> pd.DataFrame:
+    """聚合 context_L{xxxx} 多子目录到统一 DataFrame，加上 context 列。"""
+    frames: List[pd.DataFrame] = []
+    if not root.exists():
+        return pd.DataFrame()
+    for suite_dir in sorted(root.glob("context_L*")):
+        if not suite_dir.is_dir():
+            continue
+        m = re.match(r"^context_L(?P<c>\d+)$", suite_dir.name)
+        if not m:
+            continue
+        context_value = int(m.group("c"))
+        sub = collect_suite(suite_dir, "context")
+        if sub.empty:
+            continue
+        sub["context"] = context_value
+        frames.append(sub)
+    if not frames:
+        return pd.DataFrame()
+    return pd.concat(frames, ignore_index=True)
+
+
 def write_summary(df: pd.DataFrame, output_path: Path, sort_cols: List[str]) -> None:
     if df.empty:
         print(f"[warn] No rows for {output_path.name}; writing empty file")
@@ -167,6 +213,8 @@ def main() -> None:
     ratio_df = collect_suite(root / "ratio", "ratio")
     length_df = collect_suite(root / "length", "length")
     position_df = collect_suite(root / "position", "position")
+    horizon_df = collect_horizon_suite(root)
+    context_df = collect_context_suite(root)
 
     write_summary(
         ratio_df,
@@ -183,11 +231,25 @@ def main() -> None:
         output_dir / "ablation_position_summary.csv",
         ["model", "dataset", "position", "imputer"],
     )
+    if not horizon_df.empty:
+        write_summary(
+            horizon_df,
+            output_dir / "ablation_horizon_summary.csv",
+            ["model", "dataset", "horizon", "imputer"],
+        )
+    if not context_df.empty:
+        write_summary(
+            context_df,
+            output_dir / "ablation_context_summary.csv",
+            ["model", "dataset", "context", "imputer"],
+        )
 
     print("---")
     print(f"ratio rows: {len(ratio_df)} (expected 5 models × 6 datasets × 7 ratios × 5 imputers = 1050)")
     print(f"length rows: {len(length_df)} (expected 5 models × 4 datasets × 5 lengths × 4 imputers = 400)")
     print(f"position rows: {len(position_df)} (expected 5 models × 4 datasets × 3 positions × 4 imputers = 240)")
+    print(f"horizon rows: {len(horizon_df)} (expected 5 models × 6 datasets × 4 horizons × 3 imputers = 360)")
+    print(f"context rows: {len(context_df)} (expected 5 models × 6 datasets × 4 contexts × 3 imputers = 360)")
 
 
 if __name__ == "__main__":
