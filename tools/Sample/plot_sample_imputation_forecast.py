@@ -473,25 +473,26 @@ def build_candidates(
 def configure_matplotlib() -> None:
     plt.rcParams.update(
         {
-            "figure.dpi": 200,
-            "savefig.dpi": 300,
-            "font.size": 10,
-            "axes.titlesize": 11,
-            "axes.labelsize": 11,
-            "legend.fontsize": 8.5,
-            "xtick.labelsize": 9,
-            "ytick.labelsize": 9,
-            "axes.linewidth": 1.0,
-            "lines.linewidth": 2.2,
+            "figure.dpi": 220,
+            "savefig.dpi": 450,
+            "font.size": 16,
+            "axes.titlesize": 20,
+            "axes.labelsize": 20,
+            "legend.fontsize": 14,
+            "xtick.labelsize": 16,
+            "ytick.labelsize": 16,
+            "axes.linewidth": 1.8,
+            "lines.linewidth": 3.2,
             "font.family": "DejaVu Sans",
         }
     )
 
 
 def set_date_axis(ax: plt.Axes) -> None:
-    locator = mdates.AutoDateLocator(minticks=4, maxticks=8)
+    locator = mdates.AutoDateLocator(minticks=3, maxticks=5)
     ax.xaxis.set_major_locator(locator)
     ax.xaxis.set_major_formatter(mdates.ConciseDateFormatter(locator))
+    ax.tick_params(axis="both", which="major", width=1.6, length=6, pad=4)
 
 
 def plot_imputation(candidate: Candidate, methods: tuple[str, ...], output_path: Path) -> None:
@@ -526,7 +527,8 @@ def plot_imputation(candidate: Candidate, methods: tuple[str, ...], output_path:
     block_slice = slice(candidate.block_start, candidate.block_end)
     view_slice = slice(view_start, view_end)
 
-    fig, ax = plt.subplots(figsize=(10.5, 4.3), constrained_layout=True)
+    fig, ax = plt.subplots(figsize=(8.2, 5.1), constrained_layout=False)
+    fig.subplots_adjust(left=0.14, right=0.98, top=0.86, bottom=0.34)
     ax.axvspan(
         actual.timestamp.iloc[candidate.block_start],
         actual.timestamp.iloc[candidate.block_end - 1],
@@ -539,7 +541,7 @@ def plot_imputation(candidate: Candidate, methods: tuple[str, ...], output_path:
         actual.timestamp.iloc[view_slice],
         actual.values.iloc[view_slice],
         color="#111111",
-        linewidth=2.6,
+        linewidth=3.6,
         label="Ground truth",
         zorder=3,
     )
@@ -548,7 +550,7 @@ def plot_imputation(candidate: Candidate, methods: tuple[str, ...], output_path:
     ax.scatter(
         actual.timestamp.iloc[view_slice][obs],
         bm.values.iloc[view_slice][obs],
-        s=15,
+        s=34,
         color="#7A7A7A",
         alpha=0.75,
         label="Observed input",
@@ -561,30 +563,29 @@ def plot_imputation(candidate: Candidate, methods: tuple[str, ...], output_path:
             imputed[method].values.iloc[block_slice],
             color=METHOD_COLORS[method],
             linestyle=METHOD_LINESTYLES[method],
-            linewidth=2.6,
+            linewidth=3.5,
             marker=METHOD_MARKERS[method],
-            markersize=3.0,
-            markevery=max(1, block_len // 20),
+            markersize=4.2,
+            markevery=max(1, block_len // 12),
             label=METHOD_LABELS[method],
             zorder=5,
         )
 
-    title = (
-        f"Imputation sample: {candidate.dataset}, {candidate.model}, "
-        f"window {candidate.window_idx}, block [{candidate.block_start}, {candidate.block_end})"
-    )
-    ax.set_title(title, pad=8)
-    ax.set_xlabel("timestamp")
+    ax.set_title("Imputation", pad=10)
+    ax.set_xlabel("Timestamp", labelpad=10)
     ax.set_ylabel(candidate.value_col)
-    ax.grid(True, color="#E6E6E6", linewidth=0.8)
+    ax.grid(False)
     set_date_axis(ax)
     ax.legend(
         loc="upper center",
-        bbox_to_anchor=(0.5, -0.18),
+        bbox_to_anchor=(0.5, -0.28),
         frameon=True,
         framealpha=0.94,
-        ncols=4,
+        ncols=3,
         borderaxespad=0.0,
+        handlelength=2.5,
+        columnspacing=1.3,
+        labelspacing=0.35,
     )
     fig.savefig(output_path, bbox_inches="tight")
     plt.close(fig)
@@ -616,15 +617,16 @@ def plot_forecast(candidate: Candidate, methods: tuple[str, ...], output_path: P
     clean_pred = load_prediction(clean_pred_path)
     actual_forecast = actual_values_for_prediction(actual, clean_pred)
 
-    fig, ax = plt.subplots(figsize=(10.5, 4.3), constrained_layout=True)
+    fig, ax = plt.subplots(figsize=(8.2, 5.1), constrained_layout=False)
+    fig.subplots_adjust(left=0.14, right=0.98, top=0.86, bottom=0.34)
     markevery = max(1, len(clean_pred.prediction) // 90)
     ax.plot(
         clean_pred.timestamp,
         actual_forecast,
         color=FORECAST_COLORS["ground_truth"],
-        linewidth=2.8,
+        linewidth=3.7,
         marker="o",
-        markersize=3.2,
+        markersize=4.2,
         markevery=markevery,
         label="Ground truth",
         zorder=5,
@@ -633,10 +635,10 @@ def plot_forecast(candidate: Candidate, methods: tuple[str, ...], output_path: P
         clean_pred.timestamp,
         clean_pred.prediction,
         color=FORECAST_COLORS["clean"],
-        linewidth=2.4,
+        linewidth=3.2,
         linestyle=(0, (5, 2)),
         marker="s",
-        markersize=3.0,
+        markersize=4.0,
         markevery=markevery,
         label="Clean input",
         zorder=4,
@@ -648,31 +650,30 @@ def plot_forecast(candidate: Candidate, methods: tuple[str, ...], output_path: P
             pred.timestamp,
             pred.prediction,
             color=FORECAST_COLORS[method],
-            linewidth=2.3,
+            linewidth=3.3,
             linestyle=METHOD_LINESTYLES[method],
             marker=METHOD_MARKERS[method],
-            markersize=2.8,
+            markersize=4.0,
             markevery=markevery,
             label=METHOD_LABELS[method],
             zorder=3,
         )
 
-    title = (
-        f"Forecast sample: {candidate.dataset}, {candidate.model}, "
-        f"window {candidate.window_idx}"
-    )
-    ax.set_title(title, pad=8)
-    ax.set_xlabel("timestamp")
+    ax.set_title("Forecast", pad=10)
+    ax.set_xlabel("Timestamp", labelpad=10)
     ax.set_ylabel(candidate.value_col)
-    ax.grid(True, color="#E6E6E6", linewidth=0.8)
+    ax.grid(False)
     set_date_axis(ax)
     ax.legend(
         loc="upper center",
-        bbox_to_anchor=(0.5, -0.18),
+        bbox_to_anchor=(0.5, -0.28),
         frameon=True,
         framealpha=0.94,
         ncols=3,
         borderaxespad=0.0,
+        handlelength=2.5,
+        columnspacing=1.3,
+        labelspacing=0.35,
     )
     fig.savefig(output_path, bbox_inches="tight")
     plt.close(fig)
