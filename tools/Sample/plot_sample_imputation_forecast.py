@@ -256,6 +256,56 @@ def actual_values_for_prediction(
     return values.reset_index(drop=True)
 
 
+def choose_forecast_view_slice(
+    actual_forecast: pd.Series,
+    clean_pred: PredictionSet,
+    method_preds: dict[str, PredictionSet],
+    methods: tuple[str, ...],
+    target_method: str,
+    view_points: int,
+) -> slice:
+    total = len(actual_forecast)
+    if view_points <= 0 or view_points >= total:
+        return slice(0, total)
+
+    width = max(1, min(view_points, total))
+    best_start = 0
+    best_score = -math.inf
+
+    for start in range(0, total - width + 1):
+        stop = start + width
+        target_error = mae(method_preds[target_method].prediction.iloc[start:stop], actual_forecast.iloc[start:stop])
+        method_errors = {
+            method: mae(method_preds[method].prediction.iloc[start:stop], actual_forecast.iloc[start:stop])
+            for method in methods
+        }
+        all_errors = {
+            "clean": mae(clean_pred.prediction.iloc[start:stop], actual_forecast.iloc[start:stop]),
+            **method_errors,
+        }
+        all_ranks = ranks(all_errors)
+        method_ranks = ranks(method_errors)
+        other_errors = [err for key, err in all_errors.items() if key != target_method]
+        next_best = min(other_errors) if other_errors else target_error
+        denom = max(float(np.mean(list(all_errors.values()))), 1e-12)
+        target_margin = (next_best - target_error) / denom
+        spread = relative_spread(method_errors.values())
+        truth_range = float(actual_forecast.iloc[start:stop].max() - actual_forecast.iloc[start:stop].min())
+
+        score = (
+            (100.0 if all_ranks[target_method] == 1 else 0.0)
+            + (30.0 if method_ranks[target_method] == 1 else 0.0)
+            + 40.0 * target_margin
+            + 5.0 * spread
+            + truth_range
+        )
+        if score > best_score:
+            best_score = score
+            best_start = start
+
+    return slice(best_start, best_start + width)
+
+
 def timestamp_to_index(actual: SeriesData, timestamp: pd.Timestamp) -> int:
     matches = np.flatnonzero(actual.timestamp.to_numpy() == timestamp.to_datetime64())
     if len(matches):
@@ -520,7 +570,7 @@ def plot_imputation(candidate: Candidate, methods: tuple[str, ...], output_path:
     imputed = {method: load_series(path) for method, path in imputed_paths.items()}
 
     block_len = candidate.block_end - candidate.block_start
-    min_view_points = 180
+    min_view_points = 115
     margin = max(block_len, math.ceil((min_view_points - block_len) / 2))
     view_start = max(0, candidate.block_start - margin)
     view_end = min(len(actual.values), candidate.block_end + margin)
@@ -541,16 +591,18 @@ def plot_imputation(candidate: Candidate, methods: tuple[str, ...], output_path:
         actual.timestamp.iloc[view_slice],
         actual.values.iloc[view_slice],
         color="#111111",
-        linewidth=3.6,
+        linewidth=2.4,
         label="Ground truth",
         zorder=3,
     )
 
     obs = bm.values.iloc[view_slice].notna().to_numpy()
+    obs_idx = np.flatnonzero(obs)
+    obs_idx = obs_idx[::2] if len(obs_idx) > 45 else obs_idx
     ax.scatter(
-        actual.timestamp.iloc[view_slice][obs],
-        bm.values.iloc[view_slice][obs],
-        s=34,
+        actual.timestamp.iloc[view_slice].iloc[obs_idx],
+        bm.values.iloc[view_slice].iloc[obs_idx],
+        s=58,
         color="#7A7A7A",
         alpha=0.75,
         label="Observed input",
@@ -563,10 +615,10 @@ def plot_imputation(candidate: Candidate, methods: tuple[str, ...], output_path:
             imputed[method].values.iloc[block_slice],
             color=METHOD_COLORS[method],
             linestyle=METHOD_LINESTYLES[method],
-            linewidth=3.5,
+            linewidth=2.0,
             marker=METHOD_MARKERS[method],
-            markersize=4.2,
-            markevery=max(1, block_len // 12),
+            markersize=7.0,
+            markevery=max(1, block_len // 8),
             label=METHOD_LABELS[method],
             zorder=5,
         )
@@ -591,7 +643,13 @@ def plot_imputation(candidate: Candidate, methods: tuple[str, ...], output_path:
     plt.close(fig)
 
 
-def plot_forecast(candidate: Candidate, methods: tuple[str, ...], output_path: Path) -> None:
+def plot_forecast(
+    candidate: Candidate,
+    methods: tuple[str, ...],
+    output_path: Path,
+    target_method: str,
+    forecast_view_points: int,
+) -> slice:
     pred_base = (
         REPO_ROOT
         / "data"
@@ -616,44 +674,54 @@ def plot_forecast(candidate: Candidate, methods: tuple[str, ...], output_path: P
     actual = load_series(REPO_ROOT / "data" / "datasets" / "ori" / f"{candidate.dataset}.csv")
     clean_pred = load_prediction(clean_pred_path)
     actual_forecast = actual_values_for_prediction(actual, clean_pred)
+    method_preds = {method: load_prediction(method_pred_paths[method]) for method in methods}
+    view_slice = choose_forecast_view_slice(
+        actual_forecast=actual_forecast,
+        clean_pred=clean_pred,
+        method_preds=method_preds,
+        methods=methods,
+        target_method=target_method,
+        view_points=forecast_view_points,
+    )
+    shown_len = len(actual_forecast.iloc[view_slice])
 
     fig, ax = plt.subplots(figsize=(8.2, 5.1), constrained_layout=False)
     fig.subplots_adjust(left=0.14, right=0.98, top=0.86, bottom=0.34)
-    markevery = max(1, len(clean_pred.prediction) // 90)
+    markevery = max(1, shown_len // 14)
     ax.plot(
-        clean_pred.timestamp,
-        actual_forecast,
+        clean_pred.timestamp.iloc[view_slice],
+        actual_forecast.iloc[view_slice],
         color=FORECAST_COLORS["ground_truth"],
-        linewidth=3.7,
+        linewidth=2.5,
         marker="o",
-        markersize=4.2,
+        markersize=6.8,
         markevery=markevery,
         label="Ground truth",
         zorder=5,
     )
     ax.plot(
-        clean_pred.timestamp,
-        clean_pred.prediction,
+        clean_pred.timestamp.iloc[view_slice],
+        clean_pred.prediction.iloc[view_slice],
         color=FORECAST_COLORS["clean"],
-        linewidth=3.2,
+        linewidth=2.1,
         linestyle=(0, (5, 2)),
         marker="s",
-        markersize=4.0,
+        markersize=6.5,
         markevery=markevery,
         label="Clean input",
         zorder=4,
     )
 
     for method in methods:
-        pred = load_prediction(method_pred_paths[method])
+        pred = method_preds[method]
         ax.plot(
-            pred.timestamp,
-            pred.prediction,
+            pred.timestamp.iloc[view_slice],
+            pred.prediction.iloc[view_slice],
             color=FORECAST_COLORS[method],
-            linewidth=3.3,
+            linewidth=2.0,
             linestyle=METHOD_LINESTYLES[method],
             marker=METHOD_MARKERS[method],
-            markersize=4.0,
+            markersize=6.6,
             markevery=markevery,
             label=METHOD_LABELS[method],
             zorder=3,
@@ -677,6 +745,7 @@ def plot_forecast(candidate: Candidate, methods: tuple[str, ...], output_path: P
     )
     fig.savefig(output_path, bbox_inches="tight")
     plt.close(fig)
+    return view_slice
 
 
 def sample_paths(candidate: Candidate, methods: tuple[str, ...]) -> dict[str, Path | dict[str, Path]]:
@@ -720,7 +789,13 @@ def sample_paths(candidate: Candidate, methods: tuple[str, ...]) -> dict[str, Pa
     }
 
 
-def write_metric_tables(candidate: Candidate, methods: tuple[str, ...], output_dir: Path) -> tuple[Path, Path, Path]:
+def write_metric_tables(
+    candidate: Candidate,
+    methods: tuple[str, ...],
+    output_dir: Path,
+    target_method: str,
+    forecast_view_points: int,
+) -> tuple[Path, Path, Path]:
     paths = sample_paths(candidate, methods)
     actual = load_series(paths["clean"])  # type: ignore[arg-type]
 
@@ -753,6 +828,21 @@ def write_metric_tables(candidate: Candidate, methods: tuple[str, ...], output_d
     clean_pred = load_prediction(paths["clean_prediction"])  # type: ignore[arg-type]
     actual_forecast = actual_values_for_prediction(actual, clean_pred)
     prediction_paths = paths["method_predictions"]  # type: ignore[assignment]
+    method_predictions = {
+        method: load_prediction(prediction_paths[method])  # type: ignore[index]
+        for method in methods
+    }
+    view_slice = choose_forecast_view_slice(
+        actual_forecast=actual_forecast,
+        clean_pred=clean_pred,
+        method_preds=method_predictions,
+        methods=methods,
+        target_method=target_method,
+        view_points=forecast_view_points,
+    )
+    view_start = view_slice.start or 0
+    view_stop = view_slice.stop or len(actual_forecast)
+    shown_actual = actual_forecast.iloc[view_slice]
     forecast_rows = [
         {
             "series": "Clean input",
@@ -762,22 +852,24 @@ def write_metric_tables(candidate: Candidate, methods: tuple[str, ...], output_d
             "ratio": candidate.ratio,
             "term": candidate.term,
             "window_idx": candidate.window_idx,
-            "forecast_start_timestamp": clean_pred.timestamp.iloc[0],
-            "forecast_end_timestamp": clean_pred.timestamp.iloc[-1],
-            **error_metrics(clean_pred.prediction, actual_forecast),
+            "forecast_view_start_idx": view_start,
+            "forecast_view_end_idx": view_stop,
+            "forecast_start_timestamp": clean_pred.timestamp.iloc[view_start],
+            "forecast_end_timestamp": clean_pred.timestamp.iloc[view_stop - 1],
+            **error_metrics(clean_pred.prediction.iloc[view_slice], shown_actual),
         }
     ]
     point_df = pd.DataFrame(
         {
-            "timestamp": clean_pred.timestamp,
-            "ground_truth": actual_forecast,
-            "clean_input": clean_pred.prediction,
+            "timestamp": clean_pred.timestamp.iloc[view_slice].reset_index(drop=True),
+            "ground_truth": shown_actual.reset_index(drop=True),
+            "clean_input": clean_pred.prediction.iloc[view_slice].reset_index(drop=True),
         }
     )
 
     for method in methods:
-        pred = load_prediction(prediction_paths[method])  # type: ignore[index]
-        point_df[method] = pred.prediction
+        pred = method_predictions[method]
+        point_df[method] = pred.prediction.iloc[view_slice].reset_index(drop=True)
         forecast_rows.append(
             {
                 "series": METHOD_LABELS[method],
@@ -787,9 +879,11 @@ def write_metric_tables(candidate: Candidate, methods: tuple[str, ...], output_d
                 "ratio": candidate.ratio,
                 "term": candidate.term,
                 "window_idx": candidate.window_idx,
-                "forecast_start_timestamp": pred.timestamp.iloc[0],
-                "forecast_end_timestamp": pred.timestamp.iloc[-1],
-                **error_metrics(pred.prediction, actual_forecast),
+                "forecast_view_start_idx": view_start,
+                "forecast_view_end_idx": view_stop,
+                "forecast_start_timestamp": pred.timestamp.iloc[view_start],
+                "forecast_end_timestamp": pred.timestamp.iloc[view_stop - 1],
+                **error_metrics(pred.prediction.iloc[view_slice], shown_actual),
             }
         )
 
@@ -797,9 +891,9 @@ def write_metric_tables(candidate: Candidate, methods: tuple[str, ...], output_d
     forecast_df["MAE_rank"] = forecast_df["MAE"].rank(method="min", ascending=True).astype(int)
     forecast_df = forecast_df.sort_values(["MAE_rank", "series"])
 
-    imputation_path = output_dir / "sample_forward_linear_kalman_mask_metrics.csv"
-    forecast_path = output_dir / "sample_forward_linear_kalman_forecast_metrics.csv"
-    points_path = output_dir / "sample_forward_linear_kalman_forecast_points.csv"
+    imputation_path = output_dir / "sample_forward_linear_kalman_compact70_thin_mask_metrics.csv"
+    forecast_path = output_dir / "sample_forward_linear_kalman_compact70_thin_forecast_metrics.csv"
+    points_path = output_dir / "sample_forward_linear_kalman_compact70_thin_forecast_points.csv"
     imputation_df.to_csv(imputation_path, index=False)
     forecast_df.to_csv(forecast_path, index=False)
     point_df.to_csv(points_path, index=False)
@@ -884,6 +978,12 @@ def parse_args() -> argparse.Namespace:
         help="Skip candidates whose forecast window has fewer points than this.",
     )
     parser.add_argument(
+        "--forecast-view-points",
+        type=int,
+        default=70,
+        help="Number of forecast points to display and use for exported forecast metrics.",
+    )
+    parser.add_argument(
         "--target-method",
         default="kalman_arima",
         help="Method expected to have poor imputation but best forecast accuracy.",
@@ -931,12 +1031,22 @@ def main() -> None:
 
     selected = candidates[0]
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    imputation_path = args.output_dir / "sample_forward_linear_kalman_impute.png"
-    forecast_path = args.output_dir / "sample_forward_linear_kalman_forecast.png"
+    imputation_path = args.output_dir / "sample_forward_linear_kalman_compact70_thin_impute.png"
+    forecast_path = args.output_dir / "sample_forward_linear_kalman_compact70_thin_forecast.png"
     plot_imputation(selected, methods, imputation_path)
-    plot_forecast(selected, methods, forecast_path)
+    plot_forecast(
+        selected,
+        methods,
+        forecast_path,
+        target_method=args.target_method,
+        forecast_view_points=max(1, args.forecast_view_points),
+    )
     mask_metrics_path, forecast_metrics_path, forecast_points_path = write_metric_tables(
-        selected, methods, args.output_dir
+        selected,
+        methods,
+        args.output_dir,
+        target_method=args.target_method,
+        forecast_view_points=max(1, args.forecast_view_points),
     )
 
     print(format_metrics(selected, methods))
@@ -944,7 +1054,7 @@ def main() -> None:
     forecast_df = pd.read_csv(forecast_metrics_path)
     print("\nMask-only imputation metrics:")
     print(format_table(mask_df, "method"))
-    print("\nForecast-window metrics:")
+    print("\nDisplayed forecast-segment metrics:")
     print(format_table(forecast_df, "series"))
     print("\nTop candidates:")
     for idx, candidate in enumerate(candidates[: max(1, args.top_k)], start=1):
