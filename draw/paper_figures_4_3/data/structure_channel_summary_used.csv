@@ -1,0 +1,10 @@
+﻿target,combination,metrics,group_count,median_spearman,mean_spearman,positive_ratio,overall_spearman,overall_linear_r2
+relative_smape_gain,trend_only,"trend_strength,trend_linearity",504,0.1428571428571428,0.1228269085411942,0.5853174603174603,0.1467096465168565,0.0554614649120236
+relative_smape_gain,seasonal_only,"seasonal_strength,seasonal_correlation",504,0.0833333333333333,0.0584845049130763,0.5396825396825397,0.0943876950535506,0.0859675453958218
+relative_smape_gain,residual_only,residual_autocorr_lag1,504,0.119047619047619,0.0944822373393802,0.5873015873015873,0.0797890507617553,0.085108953430241
+relative_smape_gain,frequency_only,spectral_entropy,504,0.1904761904761905,0.129109977324263,0.5972222222222222,0.1305165682164425,0.0318688922040565
+relative_smape_gain,drop_trend,"seasonal_strength,seasonal_correlation,residual_autocorr_lag1,spectral_entropy",504,0.1904761904761905,0.1436130007558579,0.623015873015873,0.180320985232085,0.1486601705157111
+relative_smape_gain,drop_seasonal,"trend_strength,trend_linearity,residual_autocorr_lag1,spectral_entropy",504,0.2380952380952381,0.1775793650793651,0.6408730158730159,0.2178366269983903,0.1278462022847558
+relative_smape_gain,drop_residual,"trend_strength,trend_linearity,seasonal_strength,seasonal_correlation,spectral_entropy",504,0.1666666666666667,0.1133314436885865,0.5873015873015873,0.1725707780729495,0.101015419517326
+relative_smape_gain,drop_frequency,"trend_strength,trend_linearity,seasonal_strength,seasonal_correlation,residual_autocorr_lag1",504,0.2142857142857143,0.1671390778533635,0.625,0.2025339483018401,0.152631362338548
+relative_smape_gain,full,"trend_strength,trend_linearity,seasonal_strength,seasonal_correlation,residual_autocorr_lag1,spectral_entropy",504,0.2380952380952381,0.1780517762660619,0.6329365079365079,0.2171543110766184,0.1539122458517995
